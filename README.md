@@ -54,6 +54,8 @@ Windows supports two backends, selected with `PVM_BACKEND` or `backend` in `~/.p
 
 WHPX is used only when Windows Hypervisor Platform is enabled and the QEMU probe succeeds; otherwise native mode uses TCG and reports it. Set `PVM_QEMU_ACCEL=whpx` to force a WHPX attempt, or `PVM_QEMU_ACCEL=tcg` to force software emulation. When `create`, `start`, `clone`, or `image build` detects TCG, pvm prints backend-specific acceleration guidance. To enable WSL2 nested virtualization, set `nestedVirtualization=true` under `[wsl2]` in `%UserProfile%\.wslconfig`, run `wsl --shutdown`, restart WSL, and verify `/dev/kvm`. Explicitly setting `PVM_QEMU_ACCEL=tcg` suppresses the warning. Native Windows uses DNS-over-TCP because some Windows QEMU/network combinations cannot deliver UDP DNS; `PVM_DNS_UPSTREAM` can override the resolver (for example `tcp://192.0.2.53:53` or the default slirp address `10.0.2.3`). `pvm doctor` reports backend, OpenSSH, QEMU, WSL2, and acceleration readiness.
 
+Known limitation of the native backend: an exit using the UDP transport may never complete its WireGuard handshake from the gateway VM. The gateway log repeats `no recent handshake` and routed VMs have no network, while `pvm exit test` on the host passes, because the host does not go through the gateway's QEMU user-mode network. `--transport auto` probes from the host and can therefore still pick UDP. Add the exit with `--transport tcp` instead. The cause is not yet confirmed.
+
 ## Quickstart
 
 The daemon starts automatically when needed. The first `create` may download and bake an image; later creates are much faster.
@@ -129,6 +131,13 @@ pvm exit-agent --listen :18443 --token-file /etc/pvm-exit/token
 ```
 
 Then register it on the host with `pvm exit add`. See [SKILL.md](SKILL.md#standard-flow-deploy-an-exit-over-ssh) for the complete SSH deployment, including a systemd unit, fingerprint verification, speed tests, and rollback.
+
+The VPS firewall must accept TCP 18443 (control plane, `--listen`), UDP 18443 (WireGuard over UDP, `--udp-port`) and TCP 18444 (WireGuard over TCP, `--tcp-port`). With the `nft` or `iptables` NAT backend it must also forward traffic from the agent's TUN devices: `pvmexit0` for the UDP transport and `pvmexit1` for the TCP transport (the prefix follows `--tun-prefix`). The agent's own nftables table cannot override a drop elsewhere in the forward path, such as ufw's default `deny (routed)`. In that case `pvm exit test` still passes, because it only probes the agent itself, but VMs routed through the exit cannot open connections to the internet, although ping may still work. With ufw, allow the forwarding, replacing `eth0` with the VPS's internet-facing interface:
+
+```bash
+ufw route allow in on pvmexit0 out on eth0
+ufw route allow in on pvmexit1 out on eth0
+```
 
 To connect a phone or laptop with a standard WireGuard client, export a separate client profile from a UDP exit:
 
