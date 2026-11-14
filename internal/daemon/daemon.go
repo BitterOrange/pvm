@@ -213,7 +213,7 @@ func (s *Server) getSpec(name string) (*vm.Spec, error) {
 	spec, err := vm.Load(s.P, name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("vm %q not found", name)
+			return nil, fmt.Errorf("vm %q %w", name, errVMNotFound)
 		}
 		return nil, err
 	}
@@ -861,6 +861,12 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	spec, err := s.getSpec(name)
+	if errors.Is(err, errVMNotFound) {
+		if cl := s.orphanMemberCluster(name); cl != nil {
+			s.deleteOrphanMember(w, name, cl)
+			return
+		}
+	}
 	if err != nil {
 		writeErr(w, 404, err)
 		return
@@ -984,6 +990,13 @@ func (s *Server) recoverClusters() {
 		var running []*vm.Spec
 		for _, vn := range cl.VMs {
 			spec, err := s.getSpec(vn.Name)
+			if errors.Is(err, errVMNotFound) {
+				// Its files are gone, so nothing of it can run; keeping
+				// the daemon unready would also block the `pvm rm` that
+				// cleans it up.
+				log.Printf("recover VM %s: %v; run `pvm rm %s` to drop its leftover cluster membership", vn.Name, err, vn.Name)
+				continue
+			}
 			if err != nil {
 				healthy = false
 				log.Printf("recover VM %s: %v", vn.Name, err)
