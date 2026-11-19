@@ -91,6 +91,11 @@ func (st *appState) clipboard() string {
 	return st.Clipboard
 }
 
+// policy is the answer of the app config routes, with the defaults named.
+func (st *appState) policy() map[string]any {
+	return map[string]any{"clipboard": st.clipboard(), "drop": st.Drop, "audio": st.audio()}
+}
+
 // clipToGuest reports whether host clipboard content may enter the VM.
 func (st *appState) clipToGuest() bool {
 	return st.Clipboard == "to-guest" || st.Clipboard == "both"
@@ -1082,7 +1087,25 @@ func (s *Server) handleAppConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"clipboard": st.clipboard(), "drop": st.Drop, "audio": st.audio()})
+	writeJSON(w, 200, st.policy())
+}
+
+// handleAppConfigGet reports a VM's app policy.
+func (s *Server) handleAppConfigGet(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if _, err := s.getSpec(name); err != nil {
+		writeErr(w, 404, err)
+		return
+	}
+	lock := s.appLock(name)
+	lock.Lock()
+	defer lock.Unlock()
+	st, err := s.loadAppState(name)
+	if err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, st.policy())
 }
 
 // clipTarget turns the API's clip:<kind> into the guest's

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -287,6 +288,32 @@ func TestClipTargetFollowsPolicy(t *testing.T) {
 	}
 	if got, _, err := s.clipTarget(spec, "echo"); err != nil || got != "echo" {
 		t.Errorf("other targets must pass through: %q, %v", got, err)
+	}
+}
+
+// The app config routes name the defaults, which the state file leaves out.
+func TestAppConfigRoutes(t *testing.T) {
+	s := newAuditTestServer(t, &vm.Spec{Name: "dev1", User: "u"})
+	call := func(method, body string) string {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		s.handler().ServeHTTP(rr, httptest.NewRequest(method, "/v1/vms/dev1/apps/config", strings.NewReader(body)))
+		if rr.Code != 200 {
+			t.Fatalf("%s %s: %d %s", method, body, rr.Code, rr.Body.String())
+		}
+		return strings.TrimSpace(rr.Body.String())
+	}
+	if got, want := call("GET", ""), `{"audio":"out","clipboard":"off","drop":false}`; got != want {
+		t.Errorf("a vm without app state: %s, want %s", got, want)
+	}
+	set := call("PUT", `{"clipboard":"both","drop":true,"audio":"off"}`)
+	if got := call("GET", ""); got != set || got != `{"audio":"off","clipboard":"both","drop":true}` {
+		t.Errorf("after the change: GET %s, PUT answered %s", got, set)
+	}
+	rr := httptest.NewRecorder()
+	s.handler().ServeHTTP(rr, httptest.NewRequest("GET", "/v1/vms/dev2/apps/config", nil))
+	if rr.Code != 404 {
+		t.Errorf("an unknown vm: %d %s", rr.Code, rr.Body.String())
 	}
 }
 
