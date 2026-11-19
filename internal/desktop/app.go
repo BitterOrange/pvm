@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -168,6 +169,9 @@ type State struct {
 	// TCGFallback counts running VMs that fell back to software emulation.
 	TCGFallback int    `json:"tcg_fallback"`
 	DataDir     string `json:"data_dir"`
+	// HostCPUs is the host's logical processors: the most vcpus the
+	// forms offer for one VM.
+	HostCPUs int `json:"host_cpus"`
 }
 
 // State works under every backend; it is how the page learns that the
@@ -177,7 +181,7 @@ func (a *App) State() (State, error) {
 	if err != nil {
 		return State{}, err
 	}
-	st := State{Backend: backend, AppVersion: buildinfo.Version, DataDir: a.p.Home}
+	st := State{Backend: backend, AppVersion: buildinfo.Version, DataDir: a.p.Home, HostCPUs: runtime.NumCPU()}
 	if backend != "native" {
 		return st, nil
 	}

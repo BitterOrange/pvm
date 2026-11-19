@@ -217,6 +217,30 @@ func (a *App) InstalledApps(vm string) ([]CatalogApp, error) {
 	return list, nil
 }
 
+// AppSettings reads what `pvm app config` holds for a VM, with every
+// field named: the form shows them before anything is changed.
+func (a *App) AppSettings(vm string) (AppConfig, error) {
+	if err := a.native(); err != nil {
+		return AppConfig{}, err
+	}
+	if err := checkVM(vm); err != nil {
+		return AppConfig{}, err
+	}
+	var resp struct {
+		Clipboard string `json:"clipboard"`
+		Drop      bool   `json:"drop"`
+		Audio     string `json:"audio"`
+	}
+	if err := a.daemon.Get("/v1/vms/"+url.PathEscape(vm)+"/apps/config", &resp); err != nil {
+		return AppConfig{}, err
+	}
+	c := AppConfig{Clipboard: resp.Clipboard, Drop: "off", Audio: resp.Audio}
+	if resp.Drop {
+		c.Drop = "on"
+	}
+	return c, nil
+}
+
 // Exit is one exit node. Tokens, keys and addresses inside the tunnel
 // stay in the backend.
 type Exit struct {

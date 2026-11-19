@@ -2,31 +2,30 @@ import { backend, errorText, type CatalogApp, type CreateRequest, type Image, ty
 import { banner, button, callout, command, field, focusKey, h, input, mono, redraw, select, type Child } from "./dom";
 import { onLanguage, t } from "./i18n";
 import { icon } from "./icons";
+import { cpuControl, limits, number, outside } from "./resources";
 import { actStart, data, nav, refresh, toast } from "./store";
 import * as tasks from "./tasks";
-import { appConfigChoices, exitChoices, programCard, stageBars } from "./vms";
+import { appConfigChoices, exitChoices, newAppConfig, programCard, stageBars } from "./vms";
 
 // The CLI's rules: vm.ValidateName and the user rule of vm.ValidateSpec.
 const nameRule = /^[a-zA-Z][a-zA-Z0-9_-]{0,31}$/;
 const userRule = /^[a-z_][a-z0-9_-]{0,31}$/;
-
-const number = () => input({ type: "number", step: "1", inputmode: "numeric" });
 
 // The controls live as long as the page: the words around them are laid
 // out again when the language changes, and what was typed stays.
 const name = input({ class: "input input--mono", placeholder: "dev1" });
 const image = select([], "");
 const user = input({ class: "input input--mono" });
-const cpus = number();
-const mem = number();
-const disk = number();
+const cpus = cpuControl("create:cpus");
+const mem = number({ min: limits.mem[0], max: limits.mem[1] });
+const disk = number({ min: limits.disk[0], max: limits.disk[1] });
 const exit = select([], "");
 const clipboard = select([], "");
 const drop = select([], "");
 const audio = select([], "");
 const imageNote = h("div", { class: "slot" });
 const exitWarning = h("div", { class: "slot" });
-// cpus, memory and disk sit in one row and share the line under it
+// memory and disk sit in one row and share the line under it
 const sizeError = h("p", { class: "field-error", role: "alert" });
 const programs = h("div", { class: "pick-grid pick-grid--stack", role: "group" });
 const problem = h("div", { class: "slot" });
@@ -40,13 +39,8 @@ let goneExit = "";
 let failure: { what: "imagesError" | "defaultsError" | "catalogError" | ""; detail: string } | null = null;
 // a value the user typed is not replaced by a default read later
 const typed = new Set<HTMLElement>();
-for (const el of [user, cpus, mem, disk, exit, image]) {
+for (const el of [user, cpus.range, mem, disk, exit, image]) {
   el.addEventListener("input", () => typed.add(el));
-}
-
-function outside(el: HTMLInputElement, least: number, most: number): boolean {
-  const n = Number(el.value);
-  return el.value.trim() === "" || !Number.isInteger(n) || n < least || n > most;
 }
 
 const checks: [HTMLElement, () => string][] = [
@@ -64,11 +58,10 @@ const checks: [HTMLElement, () => string][] = [
   [exit, () => (exit.value === "" ? t.create.exitMissing : "")],
 ];
 
-// The number limits are the daemon's own.
+// The slider cannot leave its range; the two typed numbers can.
 const sizes: [HTMLInputElement, () => string][] = [
-  [cpus, () => (outside(cpus, 1, 64) ? t.create.cpusRange(1, 64) : "")],
-  [mem, () => (outside(mem, 128, 1048576) ? t.create.memoryRange(128, 1048576) : "")],
-  [disk, () => (outside(disk, 1, 4096) ? t.create.diskRange(1, 4096) : "")],
+  [mem, () => (outside(mem, ...limits.mem) ? t.resources.memoryRange(...limits.mem) : "")],
+  [disk, () => (outside(disk, ...limits.disk) ? t.resources.diskRange(...limits.disk) : "")],
 ];
 
 function complain(el: HTMLElement, message: string, slot: Element | null | undefined): void {
@@ -179,17 +172,20 @@ export function enter(): void {
   }
   failure = null;
   showProblem();
+  // the range ends at the host's processors, known by now
+  cpus.set(cpus.value());
   const b = backend();
   b.Images().then((list) => {
     images = list;
     fillImages();
   }, failed("imagesError"));
   Promise.all([b.CreateDefaults(), refresh()]).then(([d]) => {
-    for (const [el, value] of [[user, d.user], [cpus, d.cpus], [mem, d.mem_mb], [disk, d.disk_gb]] as const) {
+    for (const [el, value] of [[user, d.user], [mem, d.mem_mb], [disk, d.disk_gb]] as const) {
       if (!typed.has(el)) {
         el.value = String(value);
       }
     }
+    cpus.set(typed.has(cpus.range) ? cpus.value() : d.cpus);
     const choices = exitChoices();
     setOptions(exit, choices, d.exit);
     goneExit = choices.some((c) => c.value === d.exit) ? "" : d.exit;
@@ -206,7 +202,7 @@ function request(): CreateRequest {
     name: name.value,
     image: image.value,
     user: user.value,
-    cpus: Number(cpus.value),
+    cpus: cpus.value(),
     mem_mb: Number(mem.value),
     disk_gb: Number(disk.value),
     exit: exit.value,
@@ -256,7 +252,8 @@ function label(): void {
         field(c.image, image),
         imageNote,
         field(c.user, user, c.userHint),
-        h("div", { class: "form-grid form-grid--3" }, field(c.cpus, cpus), field(c.memory, mem), field(c.disk, disk)),
+        cpus.field,
+        h("div", { class: "form-grid form-grid--2" }, field(t.resources.memory, mem), field(t.resources.disk, disk)),
         sizeError,
       ),
       group(c.network, exitWarning, field(c.exit, exit, c.exitHint)),
@@ -266,23 +263,21 @@ function label(): void {
       { class: "form-col" },
       group(
         c.windows,
-        h(
-          "div",
-          { class: "form-grid form-grid--3" },
-          field(t.appConfig.clipboard, clipboard),
-          field(t.appConfig.drop, drop),
-          field(t.appConfig.audio, audio),
-        ),
+        h("div", { class: "form-grid form-grid--2" }, field(t.appConfig.clipboard, clipboard), field(t.appConfig.drop, drop)),
+        // its choices are sentences, which half a row would cut
+        field(t.appConfig.audio, audio),
       ),
       group(c.programs, programs),
     ),
   );
-  const config = appConfigChoices(c.keep);
-  for (const [el, options] of [[clipboard, config.clipboard], [drop, config.drop], [audio, config.audio]] as const) {
-    const value = el.value;
-    el.replaceChildren(...options.map((o) => h("option", { value: o.value }, o.label)));
+  const config = appConfigChoices();
+  for (const [el, name] of [[clipboard, "clipboard"], [drop, "drop"], [audio, "audio"]] as const) {
+    // the first layout starts from what a new VM has
+    const value = el.options.length === 0 ? newAppConfig[name] : el.value;
+    el.replaceChildren(...config[name].map((o) => h("option", { value: o.value }, o.label)));
     el.value = value;
   }
+  cpus.label();
   fillImages();
   const chosen = exit.value;
   exit.replaceChildren(...exitChoices().map((o) => h("option", { value: o.value }, o.label)));

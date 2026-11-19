@@ -16,6 +16,7 @@ import {
   type CreateRequest,
   type Exit,
   type Image,
+  type Resources,
   type Settings,
   type State,
   type Task,
@@ -42,6 +43,9 @@ interface Machine {
   // route is the VM's own exit; "" follows the default
   route: string;
 }
+
+// The app settings of each VM; one without an entry has pvm's defaults.
+const appSettings: Record<string, AppConfig> = { apptest: { clipboard: "both", drop: "off", audio: "out" } };
 
 const brokenHint = "provisioning stopped: the vm could not reach its exit my-warp; test the exit, then start broken again";
 
@@ -92,6 +96,7 @@ const state: State = {
   accel: "whpx",
   tcg_fallback: 1,
   data_dir: "C:\\Users\\me\\.pvm",
+  host_cpus: 8,
 };
 
 const images: Image[] = [
@@ -204,6 +209,34 @@ function configFlags(c: AppConfig): string[] {
   return [c.clipboard && "--clipboard " + c.clipboard, c.drop && "--drop " + c.drop, c.audio && "--audio " + c.audio].filter((f): f is string => f !== "");
 }
 
+const configure = (name: string, c: AppConfig): Step =>
+  said("pvm app config " + name + " " + configFlags(c).join(" "), ["app settings saved"], () => {
+    const now = (appSettings[name] ??= { clipboard: "off", drop: "off", audio: "out" });
+    appSettings[name] = { clipboard: c.clipboard || now.clipboard, drop: c.drop || now.drop, audio: c.audio || now.audio };
+  });
+
+// resizeSteps passes `pvm resize` only what differs, around a stop and a
+// start when the VM runs, as ResizeVM in internal/desktop does.
+function resizeSteps(m: Machine, r: Resources): Step[] {
+  const flags = [r.disk_gb !== m.disk_gb && String(r.disk_gb), r.cpus !== m.cpus && "--cpus " + r.cpus, r.mem_mb !== m.mem_mb && "--mem " + r.mem_mb].filter(
+    (f): f is string => f !== false,
+  );
+  const lines = [
+    r.cpus !== m.cpus && m.name + ": cpus set to " + r.cpus,
+    r.mem_mb !== m.mem_mb && m.name + ": memory set to " + r.mem_mb + " MB",
+    r.disk_gb !== m.disk_gb && m.name + ": disk resized to " + r.disk_gb + "G",
+  ].filter((l): l is string => l !== false);
+  const resize = said("pvm resize " + m.name + " " + flags.join(" "), lines, () => Object.assign(m, r));
+  if (m.state === "stopped") {
+    return [resize];
+  }
+  const stop = said("pvm stop " + m.name, ["stopped " + m.name], () => {
+    m.state = "stopped";
+    m.stage = m.hint = "";
+  });
+  return [stop, resize, startStep(m.name)];
+}
+
 function installStep(name: string, apps: string[]): Step {
   const lines = apps.flatMap((id) => [id + ": downloading", id + ": installing", "installed " + id]);
   return said("pvm app install " + name + " " + apps.join(" "), lines, () => (installed[name] = [...new Set([...(installed[name] ?? []), ...apps])]), 600);
@@ -220,7 +253,7 @@ function createSteps(r: CreateRequest): Step[] {
       golden ? 500 : 900,
     ),
     ...(r.exit === "" ? [] : [said("pvm route " + r.name + " --via " + r.exit, [r.name + " -> " + r.exit], () => (machine(r.name).route = r.exit))]),
-    ...(flags.length === 0 ? [] : [said("pvm app config " + r.name + " " + flags.join(" "), ["app settings saved"])]),
+    ...(flags.length === 0 ? [] : [configure(r.name, r.app_config)]),
     startStep(r.name),
     ...(r.apps.length === 0 ? [] : [installStep(r.name, r.apps)]),
   ];
@@ -251,6 +284,11 @@ const backend: Backend = {
   InstalledApps: async (vm) => {
     await sleep(400);
     return catalog.filter((app) => (installed[vm] ?? []).includes(app.id));
+  },
+  AppSettings: async (vm) => {
+    await sleep(250);
+    machine(vm);
+    return { ...(appSettings[vm] ?? { clipboard: "off", drop: "off", audio: "out" }) };
   },
   Catalog: async () => catalog,
   Exits: async () =>
@@ -297,11 +335,23 @@ const backend: Backend = {
       : Promise.resolve({ id: 0, title: "Open " + app.name + " in " + name, steps: [], done: true, ok: true, error: "", remaining: [] });
   },
   OpenFiles: (name) => one("Open files in " + name, "pvm app " + name + " -- thunar"),
-  ConfigureApps: (name, config) =>
-    configFlags(config).length === 0 ? refuse("nothing to change") : one("App settings of " + name, "pvm app config " + name + " " + configFlags(config).join(" "), ["app settings saved"]),
+  ConfigureApps: (name, config) => (configFlags(config).length === 0 ? refuse("nothing to change") : runTask("App settings of " + name, [configure(name, config)])),
   InstallApps: (name, apps) => runTask("Install programs in " + name, [installStep(name, apps)]),
   SetDefaultVM: (name) => one("Default vm: " + name, "pvm default-vm " + name, [], () => (settings.default_vm = name)),
   ClearDefaultVM: () => one("Clear the default vm", "pvm default-vm --clear", [], () => (settings.default_vm = "")),
+  ResizeVM: (name, r, restart) => {
+    const m = machines.find((x) => x.name === name);
+    if (!m) {
+      return refuse("vm " + name + " does not exist");
+    }
+    if (r.disk_gb < m.disk_gb) {
+      return refuse("the disk of " + name + " is " + m.disk_gb + " GB and can only grow");
+    }
+    if (r.cpus === m.cpus && r.mem_mb === m.mem_mb && r.disk_gb === m.disk_gb) {
+      return refuse("nothing to change");
+    }
+    return m.state === "stopped" || restart ? runTask("Resize " + name, resizeSteps(m, r)) : refuse(name + " is running, and restarting it to resize was not confirmed");
+  },
   SetVMExit: (name, via, confirmed) =>
     confirmed
       ? one("Exit of " + name + ": " + via, "pvm route " + name + " --via " + via, [name + " -> " + via], () => (machine(name).route = via))

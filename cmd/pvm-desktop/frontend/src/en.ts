@@ -48,6 +48,20 @@ export const en = {
     audioBoth: "Speakers and host microphone",
   },
 
+  // The numbers of a VM, in the Create form and in Resize.
+  resources: {
+    cpus: "CPUs",
+    cpusOf: (n: number, most: number) => n + " of " + most + " CPUs",
+    cpusHost: (host: number) => "The host has " + plural(host, "logical processor", "logical processors") + ".",
+    cpusAll: (host: number, safe: number) =>
+      "A VM that takes all " + host + " leaves none for Windows itself, and the host can freeze. " + safe + " or fewer is safer.",
+    cpusUse: (safe: number) => "Use " + safe,
+    memory: "Memory (MB)",
+    disk: "Disk (GB)",
+    memoryRange: (least: number, most: number) => "Memory must be a whole number from " + least + " to " + most + ".",
+    diskRange: (least: number, most: number) => "Disk must be a whole number from " + least + " to " + most + ".",
+  },
+
   catalog: {
     terminal: "terminal",
     window: "window",
@@ -110,6 +124,7 @@ export const en = {
     terminalIn: (name: string) => "Open a terminal in " + name,
     appIn: (name: string) => "Open an app in " + name,
     filesOf: (name: string) => "Open the files of " + name,
+    resize: "Resize",
     appSettings: "App settings",
     install: "Install programs",
     changeExit: "Change exit",
@@ -128,10 +143,19 @@ export const en = {
     open: "Open",
 
     settingsTitle: (name: Node): Part[] => ["App settings of ", name],
-    settingsText: "How the windows of programs in this VM behave on the host. Change at least one.",
-    keep: "Leave as it is",
+    settingsText: "How the windows of programs in this VM behave on the host.",
+    settingsError: "Cannot read the app settings: ",
     dropHint: (folder: Node): Part[] => ["Files dropped on the VM's windows upload into ", folder, " in the VM."],
     apply: "Apply",
+
+    resizeTitle: (name: Node): Part[] => ["Resize ", name],
+    resizeText: "How much of the host this VM gets, from its next start on.",
+    resizeRestart: (vm: string) =>
+      vm + " is running. It is stopped, resized and started again, so programs running in it are stopped.",
+    resizeRestartSubmit: "Restart and apply",
+    diskGrows: (gb: number) =>
+      "The disk only grows, from " + gb + " GB now. The VM enlarges its partition and file system at its next start.",
+    diskShrink: (gb: number) => "The disk cannot shrink: it is " + gb + " GB now.",
 
     installTitle: (name: Node): Part[] => ["Install programs in ", name],
     installText: "Downloads run in the VM and leave through its exit.",
@@ -173,12 +197,6 @@ export const en = {
     user: "User",
     userHint: "The account pvm creates in the VM.",
     userBad: "Use lowercase letters, digits, - and _, at most 32, starting with a letter or _.",
-    cpus: "CPUs",
-    memory: "Memory (MB)",
-    disk: "Disk (GB)",
-    cpusRange: (least: number, most: number) => "CPUs must be a whole number from " + least + " to " + most + ".",
-    memoryRange: (least: number, most: number) => "Memory must be a whole number from " + least + " to " + most + ".",
-    diskRange: (least: number, most: number) => "Disk must be a whole number from " + least + " to " + most + ".",
     network: "Network",
     exit: "Exit",
     exitMissing: "Choose an exit.",
@@ -186,7 +204,6 @@ export const en = {
     exitGone: (exit: string) =>
       "The default exit " + exit + " no longer exists. Choose the exit of this VM here, and set another default in Exits.",
     windows: "App windows",
-    keep: "Default",
     programs: "Programs to install",
     catalogEmpty: "The catalog is empty.",
     imagesError: "Cannot read the images: ",

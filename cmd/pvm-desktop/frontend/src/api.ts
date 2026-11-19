@@ -11,6 +11,7 @@ export interface State {
   accel: string;
   tcg_fallback: number;
   data_dir: string;
+  host_cpus: number; // the host's logical processors
 }
 
 export interface VM {
@@ -77,7 +78,8 @@ export interface CreateDefaults {
   exit: string;
 }
 
-// An empty field leaves that setting as it is.
+// Sent, an empty field leaves that setting as it is; read, every field
+// is named.
 export interface AppConfig {
   clipboard: string; // off, to-guest, to-host or both
   drop: string; // on or off
@@ -94,6 +96,12 @@ export interface CreateRequest {
   exit: string;
   app_config: AppConfig;
   apps: string[];
+}
+
+export interface Resources {
+  cpus: number;
+  mem_mb: number;
+  disk_gb: number;
 }
 
 export interface AddExitRequest {
@@ -138,6 +146,7 @@ export interface Backend {
   State(): Promise<State>;
   VMs(): Promise<VM[]>;
   InstalledApps(vm: string): Promise<CatalogApp[]>;
+  AppSettings(vm: string): Promise<AppConfig>;
   Catalog(): Promise<CatalogApp[]>;
   Exits(): Promise<Exit[]>;
   DefaultExit(): Promise<string>;
@@ -158,6 +167,7 @@ export interface Backend {
   InstallApps(name: string, ids: string[]): Promise<Task>;
   SetDefaultVM(name: string): Promise<Task>;
   ClearDefaultVM(): Promise<Task>;
+  ResizeVM(name: string, resources: Resources, restart: boolean): Promise<Task>;
   SetVMExit(name: string, via: string, confirmed: boolean): Promise<Task>;
   SetDefaultExit(via: string): Promise<Task>;
   CreateVM(request: CreateRequest): Promise<Task>;

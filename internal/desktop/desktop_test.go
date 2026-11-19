@@ -196,6 +196,9 @@ func TestState(t *testing.T) {
 	if !st.DaemonHealthy || st.DaemonStopped || st.DaemonVersion != "1.2.3" || st.Accel != "whpx" || st.TCGFallback != 1 || st.DataDir != f.app.p.Home {
 		t.Fatalf("state = %+v", st)
 	}
+	if st.HostCPUs != runtime.NumCPU() {
+		t.Fatalf("host cpus = %d, want %d", st.HostCPUs, runtime.NumCPU())
+	}
 
 	f.daemon.healthy = false
 	if err := os.WriteFile(f.app.p.DaemonStopMark(), []byte("1\n"), 0o600); err != nil {
@@ -337,6 +340,9 @@ func TestActionArgv(t *testing.T) {
 		{"install", task(func() (Task, error) { return app.InstallApps("dev1", []string{"codex", "claude-desktop"}) }), []string{"app install dev1 codex claude-desktop"}, ""},
 		{"default vm", task(func() (Task, error) { return app.SetDefaultVM("dev1") }), []string{"default-vm dev1"}, ""},
 		{"clear default vm", task(app.ClearDefaultVM), []string{"default-vm --clear"}, ""},
+		{"resize a running vm", task(func() (Task, error) {
+			return app.ResizeVM("dev1", Resources{CPUs: 4, MemMB: 2048, DiskGB: 40}, true)
+		}), []string{"stop dev1", "resize dev1 40 --cpus 4", "start dev1 --no-wait"}, ""},
 		{"vm exit", task(func() (Task, error) { return app.SetVMExit("dev1", "my-exit", true) }), []string{"route dev1 --via my-exit"}, ""},
 		{"vm direct", task(func() (Task, error) { return app.SetVMExit("dev1", "direct", true) }), []string{"route dev1 --via direct"}, ""},
 		{"default exit", task(func() (Task, error) { return app.SetDefaultExit("my-exit") }), []string{"route default --via my-exit"}, ""},
@@ -462,6 +468,13 @@ func TestRefusals(t *testing.T) {
 		"install twice":       task(func() (Task, error) { return app.InstallApps("dev1", []string{"codex", "codex"}) }),
 		"install in app name": task(func() (Task, error) { return app.InstallApps("codex", []string{"codex"}) }),
 		"default vm":          task(func() (Task, error) { return app.SetDefaultVM("--clear") }),
+		"resize flag vm":      task(func() (Task, error) { return app.ResizeVM("--cpus", Resources{CPUs: 4, MemMB: 2048, DiskGB: 20}, true) }),
+		"resize unknown vm":   task(func() (Task, error) { return app.ResizeVM("dev7", Resources{CPUs: 4, MemMB: 2048, DiskGB: 20}, true) }),
+		"resize cpus":         task(func() (Task, error) { return app.ResizeVM("dev1", Resources{CPUs: 65, MemMB: 2048, DiskGB: 20}, true) }),
+		"resize mem":          task(func() (Task, error) { return app.ResizeVM("dev1", Resources{CPUs: 2, MemMB: 0, DiskGB: 20}, true) }),
+		"resize shrink":       task(func() (Task, error) { return app.ResizeVM("dev1", Resources{CPUs: 2, MemMB: 2048, DiskGB: 10}, true) }),
+		"resize nothing":      task(func() (Task, error) { return app.ResizeVM("dev1", Resources{CPUs: 2, MemMB: 2048, DiskGB: 20}, true) }),
+		"resize, no restart":  task(func() (Task, error) { return app.ResizeVM("dev1", Resources{CPUs: 4, MemMB: 2048, DiskGB: 20}, false) }),
 		"route subcommand vm": task(func() (Task, error) { return app.SetVMExit("default", "my-exit", true) }),
 		"route unconfirmed":   task(func() (Task, error) { return app.SetVMExit("dev1", "my-exit", false) }),
 		"route unknown exit":  task(func() (Task, error) { return app.SetVMExit("dev1", "other", true) }),
@@ -532,6 +545,48 @@ func TestRefusals(t *testing.T) {
 	}
 	if len(f.terminals)+len(f.folders) != 0 {
 		t.Errorf("refused actions opened %q %q", f.terminals, f.folders)
+	}
+}
+
+// A stopped VM is resized as it is, with no restart to allow; only a
+// running one is stopped and started again around the change.
+func TestResizeAStoppedVM(t *testing.T) {
+	f := newFixture(t)
+	f.daemon.set("/v1/vms", `[{"spec":{"name":"dev1","role":"user","cpus":2,"mem_mb":2048,"disk_gb":20}},
+		{"spec":{"name":"pvm-gw1","role":"gateway","cpus":1,"mem_mb":1024,"disk_gb":10}}]`)
+	tk, err := f.app.ResizeVM("dev1", Resources{CPUs: 2, MemMB: 4096, DiskGB: 20}, false)
+	if err != nil || !tk.OK {
+		t.Fatalf("resize: %+v, %v", tk, err)
+	}
+	if got, want := f.runner.argvs(), []string{"resize dev1 --mem 4096"}; !slices.Equal(got, want) {
+		t.Errorf("ran %q, want %q", got, want)
+	}
+	if len(tk.Steps) != 1 || tk.Steps[0].Command != "pvm resize dev1 --mem 4096" {
+		t.Errorf("steps = %+v", tk.Steps)
+	}
+	if _, err := f.app.ResizeVM("pvm-gw1", Resources{CPUs: 2, MemMB: 1024, DiskGB: 10}, true); err == nil {
+		t.Error("a gateway was resized")
+	}
+}
+
+func TestAppSettings(t *testing.T) {
+	f := newFixture(t)
+	for body, want := range map[string]AppConfig{
+		`{"clipboard":"off","drop":false,"audio":"out"}`: {Clipboard: "off", Drop: "off", Audio: "out"},
+		`{"clipboard":"both","drop":true,"audio":"off"}`: {Clipboard: "both", Drop: "on", Audio: "off"},
+	} {
+		f.daemon.set("/v1/vms/dev1/apps/config", body)
+		got, err := f.app.AppSettings("dev1")
+		if err != nil || got != want {
+			t.Errorf("%s: %+v, %v; want %+v", body, got, err, want)
+		}
+		// what was read can be sent back as it is
+		if _, err := got.args(); err != nil {
+			t.Errorf("%+v is not what ConfigureApps takes: %v", got, err)
+		}
+	}
+	if _, err := f.app.AppSettings("../dev1"); err == nil {
+		t.Error("a path was read as a vm name")
 	}
 }
 
@@ -892,10 +947,10 @@ func TestSecretsStayInTheBackend(t *testing.T) {
 // boundMethods is everything the page can call. A new exported method
 // on App is reachable from JavaScript; add it here on purpose.
 var boundMethods = []string{
-	"AddExit", "AddWarpExit", "Catalog", "ClearDefaultVM", "ConfigureApps", "CreateDefaults", "CreateVM",
+	"AddExit", "AddWarpExit", "AppSettings", "Catalog", "ClearDefaultVM", "ConfigureApps", "CreateDefaults", "CreateVM",
 	"CreateWorkspace", "DefaultExit", "DeleteVM", "Exits", "Images", "InstallApps", "InstalledApps", "OpenFiles",
 	"OpenTerminal", "OpenWorkspaceFiles", "OpenWorkspaceFolder", "OpenWorkspaceTerminal", "PickFolder",
-	"RemoveExit", "RemoveWorkspace", "RunApp", "RunCatalogApp", "RunWorkspaceApp", "SetAppAtLogin",
+	"RemoveExit", "RemoveWorkspace", "ResizeVM", "RunApp", "RunCatalogApp", "RunWorkspaceApp", "SetAppAtLogin",
 	"SetDaemonAtLogin", "SetDefaultExit", "SetDefaultVM", "SetVMExit", "Settings", "StartDaemon", "StartVM",
 	"State", "StopVM", "SyncWorkspace", "TestExit", "VMs", "Workspaces",
 }

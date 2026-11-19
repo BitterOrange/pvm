@@ -1403,6 +1403,95 @@ textarea {
 .switch:checked::before {
   transform: translateX(16px);
 }
+/* Slider: a range with its value beside it. dom.ts sets --at, how far along
+   the thumb is from 0 to 1, and the track is filled up to there. */
+.slider {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: var(--control-h);
+}
+.slider-range {
+  --thumb: 18px;
+  --fill: calc(var(--thumb) / 2 + var(--at, 0) * (100% - var(--thumb)));
+  --bar: var(--accent);
+  appearance: none;
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+/* every processor of the host: the bar takes the warning's colour */
+.slider-range[data-full] {
+  --bar: var(--warn);
+}
+.slider-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: linear-gradient(to right, var(--bar) var(--fill), var(--border-strong) var(--fill));
+}
+.slider-range::-moz-range-track {
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: linear-gradient(to right, var(--bar) var(--fill), var(--border-strong) var(--fill));
+}
+.slider-range::-webkit-slider-thumb {
+  appearance: none;
+  width: var(--thumb);
+  height: var(--thumb);
+  margin-top: -7px;
+  border: 1px solid var(--field-border);
+  border-radius: 50%;
+  background: #FFFFFF;
+  box-shadow: var(--shadow-1);
+  transition: border-color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out);
+}
+.slider-range::-moz-range-thumb {
+  box-sizing: border-box;
+  width: var(--thumb);
+  height: var(--thumb);
+  border: 1px solid var(--field-border);
+  border-radius: 50%;
+  background: #FFFFFF;
+  box-shadow: var(--shadow-1);
+}
+.slider-range:hover::-webkit-slider-thumb {
+  border-color: var(--text-2);
+}
+.slider-range:active::-webkit-slider-thumb {
+  border-color: var(--bar);
+  box-shadow: 0 0 0 5px var(--accent-soft);
+}
+.slider-range[data-full]:active::-webkit-slider-thumb {
+  box-shadow: 0 0 0 5px var(--warn-soft);
+}
+.slider-range:focus-visible {
+  outline: none;
+}
+.slider-range:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.slider-range:focus-visible::-moz-range-thumb {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.slider-value {
+  flex: none;
+  min-width: 52px;
+  text-align: right;
+  color: var(--text-2);
+  font: 400 var(--fs-small) / 1.2 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.slider-value strong {
+  color: var(--text);
+  font-size: var(--fs-subhead);
+  font-weight: 600;
+}
 /* Pick cards: multi-select programs */
 .pick-grid {
   display: grid;
@@ -1466,9 +1555,8 @@ textarea {
   gap: 14px;
   min-width: 0;
 }
-.form-grid--3 {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px 12px;
+.form-grid--2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .form-grid--id {
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
@@ -1519,6 +1607,9 @@ textarea {
 }
 .callout--info .ico {
   color: var(--text-3);
+}
+.callout .btn {
+  margin-top: 8px;
 }
 .callout ul {
   margin-top: 4px;

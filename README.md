@@ -202,7 +202,7 @@ Releases ship `pvm_windows_amd64_setup.exe` and `pvm_windows_amd64_setup.msi`: p
 
 PVM Desktop is a window for the common paths, on Windows with the native (WHPX) backend. Open it from the Start menu, or run `pvm-desktop.exe`.
 
-- **VMs.** See each VM's state and startup stage; start, stop and delete; open a terminal, an app or the file manager; install catalog apps; set the default VM.
+- **VMs.** See each VM's state and startup stage; start, stop and delete; change its vCPUs, memory and disk; open a terminal, an app or the file manager; install catalog apps; set the default VM.
 - **Create.** A form for a new VM with its size, exit, clipboard, drop and audio settings, and the catalog apps to preinstall. The exit is set before the VM's first boot.
 - **Exits.** Add, test and remove exits, set the default exit and change a VM's exit.
 - **Workspaces.** Create and remove workspaces, push and pull, and open the host folder, a terminal, an app or the file manager in the matching guest folder.

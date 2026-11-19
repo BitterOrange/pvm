@@ -1,4 +1,4 @@
-import { backend, errorText, type CatalogApp, type VM } from "./api";
+import { backend, errorText, type AppConfig, type CatalogApp, type VM } from "./api";
 import {
   badge,
   banner,
@@ -26,6 +26,7 @@ import {
 import { t } from "./i18n";
 import { icon, type IconName } from "./icons";
 import * as prefs from "./prefs";
+import { cpuControl, limits, number, outside } from "./resources";
 import { act, actStart, busy, data, memory, nav, onlyFollowed } from "./store";
 
 const stateKind = { stopped: "", starting: "info", ready: "ok", failed: "danger" } as const;
@@ -75,17 +76,19 @@ export function exitDialog(name: string, current: string): void {
   });
 }
 
-// appConfigChoices are the values `pvm app config` takes; keep names the
-// empty choice, which leaves a setting alone.
-export function appConfigChoices(keep: string): Record<"clipboard" | "drop" | "audio", { value: string; label: string }[]> {
-  const first = { value: "", label: keep };
+// appConfigChoices are the values `pvm app config` takes.
+export function appConfigChoices(): Record<keyof AppConfig, { value: string; label: string }[]> {
   const c = t.appConfig;
   return {
-    clipboard: [first, { value: "off", label: c.off }, { value: "to-guest", label: c.toGuest }, { value: "to-host", label: c.toHost }, { value: "both", label: c.both }],
-    drop: [first, { value: "on", label: c.on }, { value: "off", label: c.off }],
-    audio: [first, { value: "off", label: c.off }, { value: "out", label: c.audioOut }, { value: "both", label: c.audioBoth }],
+    clipboard: [{ value: "off", label: c.off }, { value: "to-guest", label: c.toGuest }, { value: "to-host", label: c.toHost }, { value: "both", label: c.both }],
+    drop: [{ value: "off", label: c.off }, { value: "on", label: c.on }],
+    audio: [{ value: "out", label: c.audioOut }, { value: "both", label: c.audioBoth }, { value: "off", label: c.off }],
   };
 }
+
+// What the Create form starts from: the app settings of a VM that
+// `pvm app config` has not been run for.
+export const newAppConfig: AppConfig = { clipboard: "off", drop: "off", audio: "out" };
 
 // programCard is a catalog program to tick. The name and the description
 // come from the catalog as they are.
@@ -212,24 +215,101 @@ function installDialog(vm: VM): void {
     );
 }
 
+// The settings are per VM and kept by the daemon, so the dialog reads
+// them first and shows what is set now.
 function settingsDialog(vm: VM): void {
-  const choices = appConfigChoices(t.vms.keep);
-  const clipboard = select(choices.clipboard, "");
-  const drop = select(choices.drop, "");
-  const audio = select(choices.audio, "");
-  dialog({
+  const choices = appConfigChoices();
+  const controls: Record<keyof AppConfig, HTMLSelectElement> = {
+    clipboard: select(choices.clipboard, newAppConfig.clipboard),
+    drop: select(choices.drop, newAppConfig.drop),
+    audio: select(choices.audio, newAppConfig.audio),
+  };
+  const fields = h("div", { class: "slot" }, loading());
+  let now: AppConfig | null = null;
+  // an empty field is left as it is: only what differs is sent
+  const changed = (name: keyof AppConfig): string => (controls[name].value === now?.[name] ? "" : controls[name].value);
+  const change = (): AppConfig => ({ clipboard: changed("clipboard"), drop: changed("drop"), audio: changed("audio") });
+  const d = dialog({
     title: t.vms.settingsTitle(mono(vm.name)),
     text: [t.vms.settingsText],
-    content: [
-      field(t.appConfig.clipboard, clipboard),
-      field(t.appConfig.drop, drop, ...t.vms.dropHint(mono("~/Downloads"))),
-      field(t.appConfig.audio, audio),
-    ],
+    content: [fields],
     submit: t.vms.apply,
-    // at least one setting has to change
-    submitState: () => ({ disabled: clipboard.value + drop.value + audio.value === "" }),
-    onSubmit: () =>
-      void act(["vm:" + vm.name], () => backend().ConfigureApps(vm.name, { clipboard: clipboard.value, drop: drop.value, audio: audio.value })),
+    submitState: () => ({ disabled: now === null || Object.values(change()).join("") === "" }),
+    onSubmit: () => void act(["vm:" + vm.name], () => backend().ConfigureApps(vm.name, change())),
+  });
+  backend()
+    .AppSettings(vm.name)
+    .then(
+      (config) => {
+        now = config;
+        controls.clipboard.value = config.clipboard;
+        controls.drop.value = config.drop;
+        controls.audio.value = config.audio;
+        fields.replaceChildren(
+          field(t.appConfig.clipboard, controls.clipboard),
+          field(t.appConfig.drop, controls.drop, ...t.vms.dropHint(mono("~/Downloads"))),
+          field(t.appConfig.audio, controls.audio),
+        );
+        controls.clipboard.focus();
+      },
+      (e) => {
+        fields.replaceChildren();
+        d.fail(t.vms.settingsError + errorText(e));
+      },
+    );
+}
+
+function resizeDialog(vm: VM): void {
+  const running = vm.state !== "stopped";
+  const cpus = cpuControl("resize:cpus");
+  cpus.set(vm.cpus);
+  const mem = number({ min: limits.mem[0], max: limits.mem[1], value: vm.mem_mb });
+  // the disk only grows
+  const disk = number({ min: vm.disk_gb, max: limits.disk[1], value: vm.disk_gb });
+  // memory and disk sit in one row and share the line under it
+  const sizeError = h("p", { class: "field-error", role: "alert" });
+  const wanted = () => ({ cpus: cpus.value(), mem_mb: Number(mem.value), disk_gb: Number(disk.value) });
+  // the dialog has said that a running VM restarts
+  const call = () => backend().ResizeVM(vm.name, wanted(), running);
+  dialog({
+    title: t.vms.resizeTitle(mono(vm.name)),
+    text: [t.vms.resizeText],
+    content: [
+      running && callout("warn", "note", t.vms.resizeRestart(vm.name)),
+      cpus.field,
+      h(
+        "div",
+        { class: "form-grid form-grid--2" },
+        field(t.resources.memory, mem),
+        field(t.resources.disk, disk),
+        h("div", { class: "field field--span field--tight" }, sizeError, h("p", { class: "hint" }, t.vms.diskGrows(vm.disk_gb))),
+      ),
+    ],
+    submit: running ? t.vms.resizeRestartSubmit : t.vms.apply,
+    submitState: () => {
+      const w = wanted();
+      return { disabled: w.cpus === vm.cpus && w.mem_mb === vm.mem_mb && w.disk_gb === vm.disk_gb };
+    },
+    validate: () => {
+      const complaints: [HTMLInputElement, string][] = [
+        [mem, outside(mem, ...limits.mem) ? t.resources.memoryRange(...limits.mem) : ""],
+        [
+          disk,
+          !outside(disk, vm.disk_gb, limits.disk[1])
+            ? ""
+            : Number(disk.value) < vm.disk_gb && !outside(disk, ...limits.disk)
+              ? t.vms.diskShrink(vm.disk_gb)
+              : t.resources.diskRange(vm.disk_gb, limits.disk[1]),
+        ],
+      ];
+      // the shared line says the first complaint, so that one is written last
+      const bad = complaints.filter(([, text]) => text !== "");
+      complaints.filter(([, text]) => text === "").forEach(([el]) => setFieldError(el, "", sizeError));
+      bad.reverse().forEach(([el, text]) => setFieldError(el, text, sizeError));
+      return bad.length === 0;
+    },
+    // a running VM is started again, and that wait can be ended from its row
+    onSubmit: () => void (running ? actStart(vm.name, call) : act(["vm:" + vm.name], call)),
   });
 }
 
@@ -337,6 +417,7 @@ function row(vm: VM): HTMLElement {
         moreButton(
           t.common.moreFor(vm.name),
           [
+            { label: t.vms.resize, icon: "cpu", action: () => resizeDialog(vm), disabled: waiting },
             { label: t.vms.appSettings, icon: "sliders", action: () => settingsDialog(vm), disabled: waiting },
             { label: t.vms.install, icon: "download", action: () => installDialog(vm), disabled: vm.state !== "ready" },
             { label: t.vms.changeExit, icon: "route", action: () => exitDialog(vm.name, vm.exit), disabled: waiting },

@@ -21,7 +21,7 @@ The app is another client of the same daemon and the same CLI. It adds no behavi
 
 M1, the first release of the app:
 
-- **VMs.** List, state, start, stop, delete, open a terminal, open an app, open the file manager, install catalog programs.
+- **VMs.** List, state, start, stop, delete, resize, open a terminal, open an app, open the file manager, install catalog programs.
 - **Create.** A form for a new VM, including the programs to preinstall.
 - **Exits and routes.** List, add, remove and test exits; set the default exit; change a VM's exit.
 - **Workspaces.** List and create; open the host folder; open a terminal, an app or the file manager in the matching guest folder.
@@ -104,7 +104,7 @@ The VM list shows, per VM:
   - Starting, with the current stage: `cluster`, `disk+seed`, `boot`, `provision`, `ssh` or `agent`. A running VM with no stage yet, as after a daemon restart, is starting too.
   - Ready.
   - Failed, with the hint of the `failed` stage.
-- CPUs and memory.
+- CPUs, memory and disk.
 - The exit.
 - Whether it is the default VM.
 
@@ -118,7 +118,8 @@ Actions on a VM:
 - **Terminal** runs `pvm ssh <vm>` in Windows Terminal (`wt.exe`) when installed, else in a new console window.
 - **App** asks for a command line or a URL and runs `pvm app <vm> -- <cmd...>` or `pvm app <vm> <url>`. The command is split at spaces and a double quote is refused: it would not group words, and no quoting of it makes the copied command safe in both cmd.exe and PowerShell. It offers the VM's installed catalog apps as one-click entries: a window app runs `pvm app <vm> -- <start>`, a terminal app opens a terminal running `pvm ssh -t <vm> <start>`.
 - **Files** runs `pvm app <vm> -- thunar`.
-- **App settings** sets clipboard, drop and audio with `pvm app config <vm> ...`. The daemon has no route to read the current values, so a field left empty stays unchanged.
+- **Resize** changes vCPUs, memory and disk with `pvm resize <vm> [<disk-gb>] [--cpus N] [--mem MB]`, passing only what differs. The disk field refuses a smaller size. `pvm resize` takes a stopped VM, so for a running one the dialog says so and the task is `pvm stop <vm>`, the resize, then the start with its wait; a failed step leaves the rest as commands to copy.
+- **App settings** sets clipboard, drop and audio with `pvm app config <vm> ...`. The dialog first reads what the VM has (`GET /v1/vms/{name}/apps/config`) and shows it, and passes only the flags that were changed. The settings are per VM; there is none for the host.
 - **Install programs** runs `pvm app install <vm> <id>...` with the catalog programs picked, on a VM that is ready.
 - **Set as default** runs `pvm default-vm <vm>`.
 
@@ -130,8 +131,9 @@ The form asks for:
 - The image, from the supported specs.
 - The user name, `pvm` unless changed: without a terminal `pvm create` needs `--user`.
 - CPUs, memory and disk, with defaults from `config.yaml`. Create always passes them, as a running daemon keeps the defaults it started with.
+  - CPUs are a slider, here and in Resize. It ends at the host's logical processors (`runtime.NumCPU` in the app, at most the daemon's 64), or at what the VM already has when that is more. At the host's count it warns that the host can freeze and offers one less.
 - The exit: `direct`, or one of the exits.
-- Clipboard, drop and audio.
+- Clipboard, drop and audio, starting from what a new VM has: off, off and sound out. Create always passes them too, so the VM gets what the form showed.
 - The programs to preinstall, from the app catalog.
 
 Create runs these steps in order, each with its output in the progress panel:
@@ -204,6 +206,11 @@ These land in the CLI and daemon before the app. Each is its own commit, with te
 ### Readiness in the VM list
 
 `GET /v1/vms` adds `ready` and the last stage to each entry as `"stage": {"stage": <name>, "detail": <hint>}`, from the same data `GET /v1/vms/{name}` uses. Then the app and `pvm ls` need one request, not one per VM. Stage names are `cluster`, `disk+seed`, `boot`, `provision`, `ssh`, `agent`, `ready` and `failed`; `failed` carries the hint in `detail`. Gateway VMs have no stages and are never `ready`; `pvm ls` shows them as `running`.
+
+### Resize and app settings
+
+- **Resize.** `pvm resize <vm> [<disk-gb>] [--cpus N] [--mem MB]` also sets the vCPUs and memory of a stopped VM; the disk still only grows. `POST /v1/vms/{name}/resize` takes `cpus` and `mem_mb` next to `size_gb` and leaves a zero field alone. A RAM snapshot only restores into the machine it was taken from, so a change of either is refused while an unconsumed snapshot exists, with the two ways out: `pvm start` or `pvm snapshot rm`.
+- **App settings.** `GET /v1/vms/{name}/apps/config` answers what `PUT` answers, with the defaults named.
 
 ### App catalog
 

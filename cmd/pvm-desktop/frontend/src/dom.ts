@@ -602,6 +602,41 @@ export function select(options: { value: string; label: string }[], value: strin
   return el;
 }
 
+export interface Slider {
+  el: HTMLElement;
+  range: HTMLInputElement;
+  // set moves the thumb; most is where the range ends.
+  set(value: number, most: number): void;
+}
+
+// slider is a range from 1 with its value beside it, as "4 / 16". said
+// puts the same into words for a screen reader.
+export function slider(said: (value: number, most: number) => string, props: Record<string, Value> = {}): Slider {
+  const range = h("input", { type: "range", class: "slider-range", min: 1, max: 1, step: 1, ...props });
+  const now = h("strong");
+  const of = h("span");
+  const draw = () => {
+    const value = Number(range.value);
+    const most = Number(range.max);
+    now.textContent = String(value);
+    of.textContent = " / " + most;
+    range.setAttribute("aria-valuetext", said(value, most));
+    // how far along the thumb is: the track is filled up to it
+    range.style.setProperty("--at", String(most > 1 ? (value - 1) / (most - 1) : 1));
+  };
+  range.addEventListener("input", draw);
+  draw();
+  return {
+    el: h("div", { class: "slider" }, range, h("span", { class: "slider-value", "aria-hidden": "true" }, now, of)),
+    range,
+    set(value, most) {
+      range.max = String(most);
+      range.value = String(value);
+      draw();
+    },
+  };
+}
+
 export function checkbox(
   label: Child[],
   checked: boolean,

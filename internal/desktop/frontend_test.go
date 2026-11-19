@@ -97,7 +97,7 @@ func TestFrontendTypes(t *testing.T) {
 	for _, typ := range []reflect.Type{
 		reflect.TypeFor[State](), reflect.TypeFor[VM](), reflect.TypeFor[CatalogApp](), reflect.TypeFor[Exit](),
 		reflect.TypeFor[Workspace](), reflect.TypeFor[Settings](), reflect.TypeFor[Image](), reflect.TypeFor[CreateDefaults](),
-		reflect.TypeFor[AppConfig](), reflect.TypeFor[CreateRequest](), reflect.TypeFor[AddExitRequest](),
+		reflect.TypeFor[AppConfig](), reflect.TypeFor[CreateRequest](), reflect.TypeFor[Resources](), reflect.TypeFor[AddExitRequest](),
 		reflect.TypeFor[CreateWorkspaceRequest](), reflect.TypeFor[Step](), reflect.TypeFor[Task](), reflect.TypeFor[TaskOutput](),
 	} {
 		_, block, ok := strings.Cut(string(data), "export interface "+typ.Name()+" {")

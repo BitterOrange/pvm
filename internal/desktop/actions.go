@@ -376,7 +376,18 @@ func (r CreateRequest) check() error {
 	if err := vm.ValidateSpec(&vm.Spec{User: r.User}, nil); err != nil {
 		return err
 	}
-	// the daemon's own limits
+	return Resources{CPUs: r.CPUs, MemMB: r.MemMB, DiskGB: r.DiskGB}.check()
+}
+
+// Resources are the vcpus, memory and disk of a VM.
+type Resources struct {
+	CPUs   int `json:"cpus"`
+	MemMB  int `json:"mem_mb"`
+	DiskGB int `json:"disk_gb"`
+}
+
+// check applies the daemon's own limits.
+func (r Resources) check() error {
 	for _, n := range []struct {
 		name          string
 		v, least, max int
@@ -386,6 +397,55 @@ func (r CreateRequest) check() error {
 		}
 	}
 	return nil
+}
+
+// ResizeVM brings a VM to r, passing `pvm resize` only what differs; the
+// disk can only grow. `pvm resize` takes a stopped VM, so a running one
+// is stopped first and started again afterwards, which restart must
+// allow: the page tells the user before it asks.
+func (a *App) ResizeVM(name string, r Resources, restart bool) (Task, error) {
+	if err := a.native(); err != nil {
+		return Task{}, err
+	}
+	if err := checkVM(name); err != nil {
+		return Task{}, err
+	}
+	if err := r.check(); err != nil {
+		return Task{}, err
+	}
+	infos, err := a.readVMs()
+	if err != nil {
+		return Task{}, err
+	}
+	at := slices.IndexFunc(infos, func(in vmInfo) bool { return in.Spec.Name == name && in.Spec.Role != "gateway" })
+	if at < 0 {
+		return Task{}, fmt.Errorf("vm %s does not exist", name)
+	}
+	now := infos[at]
+	argv := []string{"resize", name}
+	if r.DiskGB < now.Spec.DiskGB {
+		return Task{}, fmt.Errorf("the disk of %s is %d GB and can only grow", name, now.Spec.DiskGB)
+	}
+	if r.DiskGB > now.Spec.DiskGB {
+		argv = append(argv, strconv.Itoa(r.DiskGB))
+	}
+	if r.CPUs != now.Spec.CPUs {
+		argv = append(argv, "--cpus", strconv.Itoa(r.CPUs))
+	}
+	if r.MemMB != now.Spec.MemMB {
+		argv = append(argv, "--mem", strconv.Itoa(r.MemMB))
+	}
+	if len(argv) == 2 {
+		return Task{}, errors.New("nothing to change")
+	}
+	steps := one(argv...)
+	if now.Running {
+		if !restart {
+			return Task{}, fmt.Errorf("%s is running, and restarting it to resize was not confirmed", name)
+		}
+		steps = append(append(one("stop", name), steps...), startStep(name))
+	}
+	return a.runTask("Resize "+name, steps), nil
 }
 
 // CreateVM creates a VM, sets its exit and app settings, waits until it
