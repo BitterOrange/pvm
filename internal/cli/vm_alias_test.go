@@ -1,6 +1,9 @@
 package cli
 
-import "testing"
+import (
+	"maps"
+	"testing"
+)
 
 func TestParseImageBuildArgs(t *testing.T) {
 	for _, args := range [][]string{
@@ -18,6 +21,31 @@ func TestParseImageBuildArgs(t *testing.T) {
 	for _, args := range [][]string{{}, {"ubuntu:24.04", "debian:13"}, {"--cpus", "2"}} {
 		if _, ok := parseImageBuildArgs(args); ok {
 			t.Errorf("parseImageBuildArgs(%v) unexpectedly passed", args)
+		}
+	}
+}
+
+func TestParseResizeArgs(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want map[string]int
+	}{
+		{[]string{"dev1", "40"}, map[string]int{"size_gb": 40}},
+		{[]string{"dev1", "--cpus", "4"}, map[string]int{"cpus": 4}},
+		{[]string{"--mem", "8192", "dev1"}, map[string]int{"mem_mb": 8192}},
+		{[]string{"dev1", "40", "--cpus=4", "--mem", "8192"}, map[string]int{"size_gb": 40, "cpus": 4, "mem_mb": 8192}},
+	} {
+		name, body, code := parseResizeArgs(tc.args)
+		if code != 0 || name != "dev1" || !maps.Equal(body, tc.want) {
+			t.Errorf("parseResizeArgs(%v) = %q, %v, %d; want dev1, %v", tc.args, name, body, code, tc.want)
+		}
+	}
+	for _, args := range [][]string{
+		{}, {"dev1"}, {"dev1", "40", "50"}, {"--cpus", "4"},
+		{"dev1", "0"}, {"dev1", "big"}, {"dev1", "--cpus", "0"}, {"dev1", "40", "--mem", "0"}, {"dev1", "--disk", "40"},
+	} {
+		if _, _, code := parseResizeArgs(args); code == 0 {
+			t.Errorf("parseResizeArgs(%v) unexpectedly passed", args)
 		}
 	}
 }

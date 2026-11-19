@@ -217,10 +217,12 @@ pvm stop dev1
 pvm start dev1
 pvm rm dev1 -y                  # or --force
 pvm clone dev1 dev2             # source VM must be stopped; --no-start clones without booting; --no-wait returns after boot
+pvm resize dev1 --cpus 4 --mem 8192   # a stopped VM's vCPUs and memory (MB); pvm resize dev1 40 grows its disk to 40 GB
 ```
 
 - `pvm rm` double-checks: interactively type y to confirm; **non-interactive/scripts must pass `-y` (or `--force`)** or the command refuses.
 - `pvm start` and starting clones wait for guest provisioning and the agent before returning; pass `--no-wait` when you only want to boot QEMU and will poll readiness yourself.
+- `pvm resize` needs the VM stopped and changes only what it is given: a disk size in GB (grow-only, see section 10), `--cpus N` and `--mem MB`, alone or together. vCPUs and memory cannot change while the VM has an unconsumed RAM snapshot, which only restores into the same machine: `pvm start dev1` restores it, `pvm snapshot rm dev1` deletes it.
 - clone inherits mounts, CPU/memory, user, timezone, SMBIOS, and the GPU device; the effective default exit is explicitly inherited before boot; port maps are not inherited by default but can be interactively carried over with new ports (`--inherit-ports` / `--no-inherit-ports`).
 - On first boot a clone regenerates its hostname, machine-id, SSH host keys, and management key. Other authorized keys and application identities remain copied. A private `/share` starts empty in the clone; extra mounts still refer to the explicitly configured host sources.
 

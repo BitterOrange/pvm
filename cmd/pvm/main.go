@@ -18,7 +18,8 @@ vm:
   list|ls       list vms; STATUS is stopped, starting (<stage>), ready or failed (gateways: running)
   start|stop    start/stop a vm (start waits for provisioning; --no-wait returns early; stop needs the name)
   rm            stop and delete a vm (asks for confirmation; -y|--force to skip)
-  resize        grow a stopped vm's disk (grow-only): pvm resize dev1 40
+  resize        change a stopped vm's disk, vcpus or memory: pvm resize dev1 [40] [--cpus N] [--mem MB]
+                (disk in gb, grow-only; vcpus and memory cannot change while a ram snapshot waits to be restored)
   compact       reclaim unused host disk space (vm must be stopped): pvm compact dev1
   mount         dynamic host mounts: pvm mount [dev1] [--profile coherent|readahead] [--read-only] /host:/guest | ls [dev1] | rm [dev1] /guest
   ssh           ssh into a vm: pvm ssh [-t|-T] [--yes] [dev1] [cmd...]; inside a workspace it starts in the matching directory

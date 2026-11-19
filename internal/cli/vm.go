@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"bytes"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -507,18 +508,50 @@ func CmdStart(args []string) int {
 
 func CmdStop(args []string) int { return cmdVMSimple(args, "stop") }
 
-func CmdResize(args []string) int {
-	fs := newFlagSet("resize", "<name> <size-gb>")
-	if err := fs.Parse(partitionFlags(args)); err != nil {
-		return 2
+// parseResizeArgs returns the VM and the body of its resize request, or the
+// exit code after it has said what is wrong.
+func parseResizeArgs(args []string) (name string, body map[string]int, code int) {
+	fs := newFlagSet("resize", "<name> [<disk-gb>] [--cpus N] [--mem MB]")
+	cpus := fs.Int("cpus", 0, "vcpus")
+	mem := fs.Int("mem", 0, "memory MB")
+	if err := fs.Parse(flagsFirst(fs, args)); err != nil {
+		return "", nil, 2
 	}
-	if fs.NArg() < 2 {
+	given := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
+	if fs.NArg() < 1 || fs.NArg() > 2 || (fs.NArg() == 1 && len(given) == 0) {
 		fs.Usage()
-		return 2
+		return "", nil, 2
 	}
-	gb, err := strconv.Atoi(fs.Arg(1))
-	if err != nil || gb < 1 {
-		return fatalf("size must be a whole number of GB, e.g. `pvm resize %s 40`", fs.Arg(0))
+	name = fs.Arg(0)
+	// the daemon reads 0 as "leave it", so a given 0 is refused here
+	body = map[string]int{}
+	if given["cpus"] {
+		if *cpus < 1 {
+			return "", nil, fatalf("--cpus must be a positive whole number")
+		}
+		body["cpus"] = *cpus
+	}
+	if given["mem"] {
+		if *mem < 1 {
+			return "", nil, fatalf("--mem must be a positive whole number of MB")
+		}
+		body["mem_mb"] = *mem
+	}
+	if fs.NArg() == 2 {
+		gb, err := strconv.Atoi(fs.Arg(1))
+		if err != nil || gb < 1 {
+			return "", nil, fatalf("size must be a whole number of GB, e.g. `pvm resize %s 40`", name)
+		}
+		body["size_gb"] = gb
+	}
+	return name, body, 0
+}
+
+func CmdResize(args []string) int {
+	name, body, code := parseResizeArgs(args)
+	if code != 0 {
+		return code
 	}
 	p, err := mustPaths()
 	if err != nil {
@@ -529,10 +562,18 @@ func CmdResize(args []string) int {
 		return fatalf("%v", err)
 	}
 	var resp map[string]any
-	if err := c.Post(fmt.Sprintf("/v1/vms/%s/resize", fs.Arg(0)), map[string]int{"size_gb": gb}, &resp); err != nil {
+	if err := c.Post(fmt.Sprintf("/v1/vms/%s/resize", name), body, &resp); err != nil {
 		return fatalf("%v", err)
 	}
-	fmt.Printf("%s: disk resized to %dG\n", fs.Arg(0), gb)
+	if n, ok := body["cpus"]; ok {
+		fmt.Printf("%s: cpus set to %d\n", name, n)
+	}
+	if n, ok := body["mem_mb"]; ok {
+		fmt.Printf("%s: memory set to %d MB\n", name, n)
+	}
+	if n, ok := body["size_gb"]; ok {
+		fmt.Printf("%s: disk resized to %dG\n", name, n)
+	}
 	if note, _ := resp["note"].(string); note != "" {
 		fmt.Println(note)
 	}
