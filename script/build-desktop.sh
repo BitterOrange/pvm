@@ -6,7 +6,7 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 cd "$SCRIPT_DIR/.."
 PVM_VERSION=$(printf %s "${PVM_VERSION:-$(cat VERSION)}" | tr -d '\r\n')
-PVM_RSRC_VERSION=v0.10.2
+PVM_WINRES_VERSION=v0.3.3
 app=cmd/pvm-desktop
 
 echo "== frontend"
@@ -17,9 +17,11 @@ asset=$(find "$app/frontend/dist" -type f ! -name index.html | LC_ALL=C sort | h
 echo "== pvm-desktop.exe"
 # A plain go build skips the resource step of the wails CLI. Without the
 # manifest Windows treats the app as DPI-unaware and scales it as a bitmap.
+# Wails sets the window icon from icon resource 3, so winres.json gives the
+# icon that ID; Explorer and the shortcuts show the same icon.
 syso="$app/rsrc_windows_amd64.syso"
 trap 'rm -f "$syso"' EXIT
-go run "github.com/akavel/rsrc@$PVM_RSRC_VERSION" -arch amd64 -manifest "$app/pvm-desktop.exe.manifest" -o "$syso"
+go run "github.com/tc-hib/go-winres@$PVM_WINRES_VERSION" make --in "$app/winres.json" --arch amd64 --out "$app/rsrc"
 # wv2runtime.browser: a missing WebView2 runtime opens Microsoft's download
 # page; the default would download and install it without asking.
 CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -buildvcs=false \
