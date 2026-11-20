@@ -237,6 +237,12 @@ const clear = button(
       }
     }
     summarise();
+    // with nothing left to show the panel closes, and focus moves to the
+    // bar instead of staying on the hidden button
+    if (entries.size === 0) {
+      setOpen(false);
+      bar.focus();
+    }
   },
   { size: "sm" },
 );
