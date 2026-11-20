@@ -81,6 +81,11 @@ export const en = {
     daemonUp: "Daemon running",
     daemonDown: "Daemon not running",
     daemonUnknown: "Daemon state unknown",
+    daemonStop: "Stop the daemon",
+    daemonStopTitle: "Stop the pvm daemon?",
+    daemonStopVMs: (running: number) =>
+      (running === 1 ? "1 running VM is" : running + " running VMs are") + " shut down with it, and their app windows and terminals close.",
+    daemonStopText: "PVM Desktop shows no VMs or exits while the daemon is stopped, and does not start it again by itself.",
   },
 
   gate: {
@@ -93,6 +98,7 @@ export const en = {
     stoppedTitle: "The pvm daemon is stopped",
     missingTitle: "The pvm daemon is not running",
     startingTitle: "Starting the pvm daemon...",
+    stoppingTitle: "Stopping the pvm daemon...",
     stoppedText: (command: Node): Part[] => [
       "It was stopped with ",
       command,

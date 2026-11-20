@@ -75,6 +75,10 @@ export const zh: Messages = {
     daemonUp: "守护进程运行中",
     daemonDown: "守护进程未运行",
     daemonUnknown: "守护进程状态未知",
+    daemonStop: "停止守护进程",
+    daemonStopTitle: "停止 pvm 守护进程？",
+    daemonStopVMs: (running) => `正在运行的 ${running} 台虚拟机会随之关机，它们的应用窗口和终端也会关闭。`,
+    daemonStopText: "守护进程停止期间，PVM Desktop 不显示虚拟机和出口，也不会自行把它重新启动。",
   },
 
   gate: {
@@ -87,6 +91,7 @@ export const zh: Messages = {
     stoppedTitle: "pvm 守护进程已停止",
     missingTitle: "pvm 守护进程没有在运行",
     startingTitle: "正在启动 pvm 守护进程…",
+    stoppingTitle: "正在停止 pvm 守护进程…",
     stoppedText: (command): Part[] => [
       "它是用 ",
       command,

@@ -85,6 +85,10 @@ When the daemon is not healthy at start, the app runs `pvm daemon start` and sho
 
 If the `run/daemon.stopped` mark exists, the user stopped the daemon on purpose. The app then shows a "Start the daemon" button instead of starting it.
 
+### Daemon stop
+
+Beside the daemon's state in the sidebar, while it runs, a button stops it with `pvm daemon stop`. The app asks first and says how many VMs are running, as the daemon shuts them down on its way out. The command leaves the stopped mark, so the app then shows the "Start the daemon" page.
+
 ### Security
 
 - **No extra listener.** In production mode Wails serves the frontend from memory over its own IPC and opens no network port.

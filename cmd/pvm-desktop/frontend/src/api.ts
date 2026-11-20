@@ -157,6 +157,7 @@ export interface Backend {
   PickFolder(): Promise<string>;
 
   StartDaemon(): Promise<Task>;
+  StopDaemon(confirmed: boolean): Promise<Task>;
   StartVM(name: string): Promise<Task>;
   StopVM(name: string): Promise<Task>;
   DeleteVM(name: string, confirmed: boolean): Promise<Task>;

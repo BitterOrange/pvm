@@ -1,6 +1,6 @@
 import { backend, bound, errorText, windowIsMinimised } from "./api";
 import * as create from "./create";
-import { button, callout, command, dropTip, focusKey, h, held, iconButton, mono, refocus, spinner } from "./dom";
+import { button, callout, command, dialog, dropTip, focusKey, h, held, iconButton, mono, refocus, spinner } from "./dom";
 import * as exits from "./exits";
 import { language, onLanguage, t } from "./i18n";
 import { icon, type IconName } from "./icons";
@@ -43,6 +43,8 @@ const links = order.map((id) =>
 const indicator = h("span", { class: "nav-indicator", "aria-hidden": "true" });
 const daemonText = h("span", { class: "daemon-text" });
 const daemonStatus = h("div", { class: "daemon", role: "status", "data-tip-rail": true }, h("span", { class: "daemon-dot", "aria-hidden": "true" }), daemonText);
+const daemonStop = iconButton("power", "", stopDaemonDialog, { small: true, key: "daemon:stop" });
+daemonStop.classList.add("daemon-stop");
 const version = h("span", { class: "nav-version" });
 const collapse = iconButton("sidebar", "", () => setCollapsed(side.dataset.collapsed !== "true"), { small: true });
 collapse.classList.add("nav-toggle");
@@ -51,7 +53,7 @@ const side = h(
   { class: "nav" },
   h("div", { class: "nav-top" }, h("span", { class: "nav-mark", "aria-hidden": "true" }, icon("box")), h("span", { class: "nav-name", lang: "en" }, "PVM Desktop"), collapse),
   h("div", { class: "nav-list" }, indicator, ...links),
-  h("div", { class: "nav-foot" }, daemonStatus, version),
+  h("div", { class: "nav-foot" }, h("div", { class: "daemon-row" }, daemonStatus, daemonStop), version),
 );
 
 // The sidebar narrows to its icons; a window below 860px does that by
@@ -75,6 +77,8 @@ function labelShell(): void {
   const toggle = side.dataset.collapsed === "true" ? t.nav.expand : t.nav.collapse;
   collapse.setAttribute("aria-label", toggle);
   collapse.dataset.tip = toggle;
+  daemonStop.setAttribute("aria-label", t.nav.daemonStop);
+  daemonStop.dataset.tip = t.nav.daemonStop;
 }
 
 nav.go = (id) => {
@@ -102,6 +106,25 @@ function startDaemon(): void {
     const task = await backend().StartDaemon();
     await readState();
     return task;
+  });
+}
+
+// The stop is asked about first: the daemon shuts its VMs down as it goes.
+function stopDaemonDialog(): void {
+  const running = (data.vms ?? []).filter((vm) => vm.state === "ready" || vm.state === "starting").length;
+  dialog({
+    title: [t.nav.daemonStopTitle],
+    content: [running > 0 && callout("warn", "note", t.nav.daemonStopVMs(running)), h("p", null, t.nav.daemonStopText)],
+    submit: t.nav.daemonStop,
+    submitIcon: "power",
+    danger: true,
+    narrow: true,
+    onSubmit: () =>
+      void act(["daemon", "daemon:stop"], async () => {
+        const task = await backend().StopDaemon(true);
+        await readState();
+        return task;
+      }),
   });
 }
 
@@ -151,7 +174,7 @@ function gate(): HTMLElement {
     "div",
     { class: "state", role: "status" },
     working ? h("div", { class: "state-art state-art--accent", "aria-hidden": "true" }, spinner()) : art("power"),
-    h("h1", { class: "state-title" }, working ? t.gate.startingTitle : st.daemon_stopped ? t.gate.stoppedTitle : t.gate.missingTitle),
+    h("h1", { class: "state-title" }, busy.has("daemon:stop") ? t.gate.stoppingTitle : working ? t.gate.startingTitle : st.daemon_stopped ? t.gate.stoppedTitle : t.gate.missingTitle),
     h("p", { class: "state-text" }, ...(st.daemon_stopped ? t.gate.stoppedText(mono("pvm daemon stop")) : [t.gate.missingText])),
     !working && button(t.gate.start, startDaemon, { kind: "primary", size: "lg", icon: "power", key: "daemon:start" }),
   );
@@ -184,6 +207,8 @@ function render(force = false): void {
   const daemon = st === null ? "unknown" : ready() ? "running" : "stopped";
   daemonStatus.dataset.state = daemon;
   daemonStatus.dataset.tip = daemonText.textContent = daemon === "running" ? t.nav.daemonUp : daemon === "stopped" ? t.nav.daemonDown : t.nav.daemonUnknown;
+  daemonStop.hidden = daemon !== "running";
+  daemonStop.setAttribute("aria-disabled", String(busy.has("daemon")));
   version.textContent = st?.app_version ?? "";
 
   const signature = JSON.stringify([language(), nav.current, data, busy.entries(), following.entries()]);

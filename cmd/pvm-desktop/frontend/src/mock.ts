@@ -314,6 +314,11 @@ const backend: Backend = {
       state.daemon_healthy = true;
       state.daemon_stopped = false;
     }),
+  StopDaemon: () =>
+    one("Stop the daemon", "pvm daemon stop", ["daemon stopped"], () => {
+      state.daemon_healthy = false;
+      state.daemon_stopped = true;
+    }),
   StartVM: (name) => runTask("Start " + name, [startStep(name)]),
   StopVM: (name) =>
     one("Stop " + name, "pvm stop " + name, ["stopped " + name], () => {

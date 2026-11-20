@@ -78,6 +78,19 @@ func (a *App) StartDaemon() (Task, error) {
 	return a.runTask("Start the daemon", one("daemon", "start")), nil
 }
 
+// StopDaemon needs confirmed: the page asks the user, as the daemon
+// shuts every running VM down on its way out. `pvm daemon stop` leaves
+// the mark that keeps the app from starting it again by itself.
+func (a *App) StopDaemon(confirmed bool) (Task, error) {
+	if err := a.native(); err != nil {
+		return Task{}, err
+	}
+	if !confirmed {
+		return Task{}, errors.New("stopping the daemon was not confirmed")
+	}
+	return a.runTask("Stop the daemon", one("daemon", "stop")), nil
+}
+
 func (a *App) StartVM(name string) (Task, error) {
 	if err := a.native(); err != nil {
 		return Task{}, err
