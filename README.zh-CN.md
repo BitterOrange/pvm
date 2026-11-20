@@ -35,6 +35,7 @@
 - [x] 保存的默认虚拟机、`pvm ls` 显示就绪状态，以及用 `pvm app install` 安装内置应用（v1.3.0）
 - [x] 合并上游：内核参数与端口映射加固、旧虚拟机上的 `pvm desktop`、macOS 的 uid 和更严格的停止错误处理（v1.3.1）
 - [x] `pvm resize --cpus/--mem`，以及在 PVM Desktop 里调整虚拟机资源（v1.3.2）
+- [x] 在 PVM Desktop 里关闭 daemon，在虚拟机内检测已安装的应用，应用目录加入 Firefox（v1.3.3）
 
 计划中：
 

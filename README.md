@@ -35,6 +35,7 @@ Shipped:
 - [x] A stored default VM, readiness in `pvm ls`, and built-in apps with `pvm app install` (v1.3.0)
 - [x] Upstream merged: kernel-arg and port-map hardening, `pvm desktop` on older VMs, macOS uid and stricter stop errors (v1.3.1)
 - [x] `pvm resize --cpus/--mem` and resizing a VM in PVM Desktop (v1.3.2)
+- [x] Stopping the daemon from PVM Desktop, and installed apps detected in the VM, with Firefox in the catalog (v1.3.3)
 
 Planned:
 
