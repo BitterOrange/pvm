@@ -109,9 +109,10 @@ function startDaemon(): void {
   });
 }
 
-// The stop is asked about first: the daemon shuts its VMs down as it goes.
+// The stop is asked about first: the daemon shuts its VMs down as it goes,
+// a failed one too, as its QEMU still runs.
 function stopDaemonDialog(): void {
-  const running = (data.vms ?? []).filter((vm) => vm.state === "ready" || vm.state === "starting").length;
+  const running = (data.vms ?? []).filter((vm) => vm.state !== "stopped").length;
   dialog({
     title: [t.nav.daemonStopTitle],
     content: [running > 0 && callout("warn", "note", t.nav.daemonStopVMs(running)), h("p", null, t.nav.daemonStopText)],
