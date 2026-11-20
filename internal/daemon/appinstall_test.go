@@ -49,10 +49,29 @@ func TestAppCatalogRoute(t *testing.T) {
 }
 
 func TestCatalogAppFor(t *testing.T) {
-	for prog, want := range map[string]string{"claude-desktop": "claude-desktop", "/usr/bin/claude": "claude-code", "codex": "codex", "gedit": ""} {
+	for prog, want := range map[string]string{"claude-desktop": "claude-desktop", "/usr/bin/claude": "claude-code", "codex": "codex", "firefox": "firefox", "gedit": ""} {
 		if id, ok := catalogAppFor(prog); id != want || ok != (want != "") {
 			t.Errorf("catalogAppFor(%q) = %q, %v; want %q", prog, id, ok, want)
 		}
+	}
+}
+
+func TestCatalogProbe(t *testing.T) {
+	probe := catalogProbe([]apps.App{{ID: "claude-code", Start: "claude"}, {ID: "x", Start: "it's --flag"}})
+	if !strings.HasPrefix(probe, `PATH="$HOME/.local/bin:$PATH"; `) {
+		t.Errorf("probe %q does not look in ~/.local/bin", probe)
+	}
+	for _, want := range []string{"command -v 'claude' >/dev/null 2>&1 && echo HAVE 'claude-code'; ", `command -v 'it'"'"'s' `} {
+		if !strings.Contains(probe, want) {
+			t.Errorf("probe %q lacks %q", probe, want)
+		}
+	}
+	out := "motd line\nHAVE firefox\nHAVE claude-code\nHAVE ../x\nHAVE firefox\n"
+	if got := catalogFound(out); !slices.Equal(got, []string{"claude-code", "firefox"}) {
+		t.Errorf("catalogFound = %v", got)
+	}
+	if got := catalogFound(""); got == nil || len(got) != 0 {
+		t.Errorf("catalogFound(\"\") = %#v, want empty", got)
 	}
 }
 

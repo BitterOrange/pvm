@@ -1,0 +1,6 @@
+name: Firefox
+description: Mozilla's browser; pvm's images already have it, and pvm app opens web pages in it
+homepage: https://www.mozilla.org/firefox/linux/
+source: official
+window: true
+start: firefox

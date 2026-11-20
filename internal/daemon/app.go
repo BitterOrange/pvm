@@ -20,6 +20,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/huangzheng2016/pvm/internal/apps"
 	"github.com/huangzheng2016/pvm/internal/fsutil"
 	"github.com/huangzheng2016/pvm/internal/image"
 	"github.com/huangzheng2016/pvm/internal/vm"
@@ -848,7 +849,9 @@ func (st *appState) hasWebapps() bool {
 }
 
 // listApps reports a VM's apps and its installed catalog apps. Exited
-// apps are reported once and then dropped from the record.
+// apps are reported once and then dropped from the record. A running VM
+// is asked which catalog apps it has, so one installed with the image or
+// by hand counts too; a stopped one answers with what was last seen.
 func (s *Server) listApps(ctx context.Context, spec *vm.Spec) ([]appView, []string, error) {
 	lock := s.appLock(spec.Name)
 	lock.Lock()
@@ -857,11 +860,27 @@ func (s *Server) listApps(ctx context.Context, spec *vm.Spec) ([]appView, []stri
 	if err != nil {
 		return nil, nil, err
 	}
+	run, err := s.instance(spec).Running()
+	up := err == nil && run != nil
+	changed := false
+	if up {
+		if out, err := s.sshRunCtx(ctx, spec, catalogProbe(apps.List())); err == nil {
+			if found := catalogFound(out); !slices.Equal(found, st.Installed) {
+				st.Installed, changed = found, true
+			}
+		}
+	}
+	save := func() error {
+		if !changed {
+			return nil
+		}
+		return s.saveAppState(spec.Name, st)
+	}
 	if len(st.Apps) == 0 {
-		return nil, st.Installed, nil
+		return nil, st.Installed, save()
 	}
 	var active map[string]bool
-	if run, err := s.instance(spec).Running(); err == nil && run != nil {
+	if up {
 		active = s.appUnitsActive(ctx, spec, st.Apps)
 	} else {
 		active = map[string]bool{}
@@ -880,13 +899,10 @@ func (s *Server) listApps(ctx context.Context, spec *vm.Spec) ([]appView, []stri
 	if active != nil {
 		kept := slices.DeleteFunc(slices.Clone(st.Apps), func(a appRecord) bool { return !active[a.ID] })
 		if len(kept) != len(st.Apps) {
-			st.Apps = kept
-			if err := s.saveAppState(spec.Name, st); err != nil {
-				return views, st.Installed, err
-			}
+			st.Apps, changed = kept, true
 		}
 	}
-	return views, st.Installed, nil
+	return views, st.Installed, save()
 }
 
 // appListResponse is the answer of the app list routes. Installed maps a

@@ -36,6 +36,37 @@ func catalogAppFor(prog string) (string, bool) {
 	return "", false
 }
 
+// catalogProbe prints "HAVE <id>" for each catalog app whose start
+// command the VM has, however it was installed: by `pvm app install`,
+// with the image, or by hand. It runs as the VM user over plain ssh,
+// whose PATH lacks ~/.local/bin, where vendor installers such as Claude
+// Code's and Codex's put their command.
+func catalogProbe(list []apps.App) string {
+	var b strings.Builder
+	b.WriteString(`PATH="$HOME/.local/bin:$PATH"; `)
+	for _, a := range list {
+		f := strings.Fields(a.Start)
+		if len(f) == 0 {
+			continue
+		}
+		fmt.Fprintf(&b, "command -v %s >/dev/null 2>&1 && echo HAVE %s; ", shellQuote(f[0]), shellQuote(a.ID))
+	}
+	b.WriteString("true")
+	return b.String()
+}
+
+// catalogFound reads the output of catalogProbe, sorted by id.
+func catalogFound(out string) []string {
+	found := []string{}
+	for _, l := range strings.Split(out, "\n") {
+		if id, ok := strings.CutPrefix(strings.TrimSpace(l), "HAVE "); ok && apps.ValidID(id) && !slices.Contains(found, id) {
+			found = append(found, id)
+		}
+	}
+	slices.Sort(found)
+	return found
+}
+
 func (s *Server) handleAppCatalog(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, apps.List())
 }

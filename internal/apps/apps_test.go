@@ -19,7 +19,7 @@ func TestCatalog(t *testing.T) {
 			t.Fatalf("Get(%q) = %+v, %v", a.ID, got, ok)
 		}
 	}
-	if want := []string{"claude-code", "claude-desktop", "codex"}; !slices.Equal(ids, want) {
+	if want := []string{"claude-code", "claude-desktop", "codex", "firefox"}; !slices.Equal(ids, want) {
 		t.Fatalf("catalog ids = %v, want %v", ids, want)
 	}
 	if _, ok := Get("nope"); ok {

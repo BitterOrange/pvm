@@ -10,9 +10,9 @@ command -v curl >/dev/null && command -v gpg >/dev/null || {
 # Anthropic signs the claude-code and claude-desktop repositories with it.
 claude_key_fpr=31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE
 
-# apt_repo NAME KEY_URL FINGERPRINT URI adds a signed APT repository. It
-# fails unless the downloaded key has exactly one primary key with the
-# pinned fingerprint.
+# apt_repo NAME KEY_URL FINGERPRINT URI [SUITE] adds a signed APT repository
+# (suite stable by default). It fails unless the downloaded key has exactly
+# one primary key with the pinned fingerprint.
 apt_repo() {
   local key fpr
   key=$(mktemp)
@@ -28,7 +28,7 @@ apt_repo() {
   cat > "/etc/apt/sources.list.d/$1.sources" <<EOF
 Types: deb
 URIs: $4
-Suites: stable
+Suites: ${5:-stable}
 Components: main
 Signed-By: /etc/apt/keyrings/$1.asc
 EOF

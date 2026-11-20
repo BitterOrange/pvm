@@ -168,7 +168,7 @@ pvm app install dev1 claude-code codex claude-desktop
 
 Clipboard and drops are off until you enable them per VM. With `--clipboard to-guest` or `both`, host content enters the VM only when one of its windows comes to the front or you copy while it is there, and content that password managers mark as excluded is never sent. Text, images and, on Windows hosts, files and folders copy both ways. Text typed with a host input method, such as Chinese with Microsoft Pinyin or emoji from the emoji panel, reaches the app as well. Sound plays on the host's speakers; `--audio both` also lends the VM the host's microphone. See [docs/design/app.md](docs/design/app.md).
 
-`pvm app catalog` lists the apps pvm can install for you: Claude Code, Codex CLI and Claude Desktop, each the vendor's official Linux build. `pvm app install [<vm>] <id>...` runs the app's built-in install script as root inside the VM; downloads happen in the VM and leave through its exit, never through the host. `pvm app ls` also shows the catalog apps installed in each VM.
+`pvm app catalog` lists the apps pvm can install for you: Claude Code, Codex CLI, Claude Desktop and Firefox, each the vendor's official Linux build. `pvm app install [<vm>] <id>...` runs the app's built-in install script as root inside the VM; downloads happen in the VM and leave through its exit, never through the host. `pvm app ls` also shows the catalog apps each VM has, including ones installed with the image or by hand.
 
 ### Browser desktop
 
