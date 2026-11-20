@@ -143,7 +143,7 @@ export const en = {
     runHint: "A command runs in the VM and shows its window here. A URL opens in the VM's browser.",
     runEmpty: "Enter a command or a URL.",
     installed: "Installed programs",
-    inTerminal: "(terminal)",
+    inTerminal: "Runs in a terminal: open a workspace's terminal and start it there.",
     noneInstalled: "None yet. Install some with More, Install programs.",
     installedError: "Cannot list the installed programs: ",
     open: "Open",

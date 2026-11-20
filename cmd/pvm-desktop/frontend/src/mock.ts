@@ -334,10 +334,7 @@ const backend: Backend = {
     if (!app) {
       return refuse('unknown app "' + id + '"');
     }
-    // a terminal program opens a terminal and leaves no task to follow
-    return app.window
-      ? one("Open " + app.name + " in " + name, "pvm app " + name + " -- " + app.start)
-      : Promise.resolve({ id: 0, title: "Open " + app.name + " in " + name, steps: [], done: true, ok: true, error: "", remaining: [] });
+    return app.window ? one("Open " + app.name + " in " + name, "pvm app " + name + " -- " + app.start) : refuse(app.name + " runs in a terminal");
   },
   OpenFiles: (name) => one("Open files in " + name, "pvm app " + name + " -- thunar"),
   ConfigureApps: (name, config) => (configFlags(config).length === 0 ? refuse("nothing to change") : runTask("App settings of " + name, [configure(name, config)])),

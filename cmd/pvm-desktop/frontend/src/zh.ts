@@ -136,7 +136,7 @@ export const zh: Messages = {
     runHint: "命令在虚拟机里运行，窗口显示在这里。URL 会用虚拟机里的浏览器打开。",
     runEmpty: "请输入命令或 URL。",
     installed: "已安装的程序",
-    inTerminal: "（终端）",
+    inTerminal: "终端程序：请打开工作区的终端，在那里启动。",
     noneInstalled: '还没有。可以通过"更多 > 安装程序"安装。',
     installedError: "无法列出已安装的程序：",
     open: "打开",

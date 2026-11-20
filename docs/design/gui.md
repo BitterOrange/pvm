@@ -120,7 +120,7 @@ Actions on a VM:
 - **Stop** runs `pvm stop <vm>`.
 - **Delete** asks first, naming the VM, then runs `pvm rm <vm> -y`.
 - **Terminal** runs `pvm ssh <vm>` in Windows Terminal (`wt.exe`) when installed, else in a new console window.
-- **App** asks for a command line or a URL and runs `pvm app <vm> -- <cmd...>` or `pvm app <vm> <url>`. The command is split at spaces and a double quote is refused: it would not group words, and no quoting of it makes the copied command safe in both cmd.exe and PowerShell. It offers the VM's installed catalog apps as one-click entries: a window app runs `pvm app <vm> -- <start>`, a terminal app opens a terminal running `pvm ssh -t <vm> <start>`.
+- **App** asks for a command line or a URL and runs `pvm app <vm> -- <cmd...>` or `pvm app <vm> <url>`. The command is split at spaces and a double quote is refused: it would not group words, and no quoting of it makes the copied command safe in both cmd.exe and PowerShell. It lists the VM's installed catalog apps: a window app is a one-click entry that runs `pvm app <vm> -- <start>`. A terminal app is listed but cannot be clicked, as it works on the folder it starts in; the list says to start it from a workspace's terminal, which opens in the matching folder.
 - **Files** runs `pvm app <vm> -- thunar`.
 - **Resize** changes vCPUs, memory and disk with `pvm resize <vm> [<disk-gb>] [--cpus N] [--mem MB]`, passing only what differs. The disk field refuses a smaller size. `pvm resize` takes a stopped VM, so for a running one the dialog says so and the task is `pvm stop <vm>`, the resize, then the start with its wait; a failed step leaves the rest as commands to copy.
 - **App settings** sets clipboard, drop and audio with `pvm app config <vm> ...`. The dialog first reads what the VM has (`GET /v1/vms/{name}/apps/config`) and shows it, and passes only the flags that were changed. The settings are per VM; there is none for the host.
@@ -230,7 +230,7 @@ These land in the CLI and daemon before the app. Each is its own commit, with te
   - `pvm app catalog`.
   - `pvm app install [<vm>] <id>...`.
   - `pvm app ls` shows the installed catalog apps.
-- **M1 catalog:** Claude Code CLI, Codex CLI and Claude Desktop.
+- **M1 catalog:** Claude Code CLI, Codex CLI and Claude Desktop; Firefox was added later. A running VM is asked which catalog commands it has, so an app installed another way is listed too.
   - The implementer checks the current official Linux install method for each.
   - ChatGPT Desktop has an official Linux preview, but it is left out for now: its package comes as a plain download with no published checksum or signing key to pin.
   - A program without an official Linux build is left out unless a maintained community build exists. When one is used, it is marked as community in `app.yaml` and in the app.

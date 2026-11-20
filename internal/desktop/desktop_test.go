@@ -401,15 +401,12 @@ func TestActionArgv(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if tk, err := app.RunCatalogApp("dev1", "codex"); err != nil || !tk.OK || len(tk.Steps) != 0 {
-		t.Fatalf("terminal app: %+v, %v", tk, err)
-	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
 	}
 	// a VM's terminal starts in ~, whatever the app's working directory
-	wantTerminals := []string{home + "|ssh dev1", host + "|ssh dev1", loose + "|ssh", home + "|ssh -t dev1 codex"}
+	wantTerminals := []string{home + "|ssh dev1", host + "|ssh dev1", loose + "|ssh"}
 	if !slices.Equal(f.terminals, wantTerminals) {
 		t.Errorf("terminals = %q, want %q", f.terminals, wantTerminals)
 	}
@@ -460,6 +457,7 @@ func TestRefusals(t *testing.T) {
 		"app quote":               task(func() (Task, error) { return app.RunApp("dev1", `sh -c "a&b"`) }),
 		"catalog id":              task(func() (Task, error) { return app.RunCatalogApp("dev1", "--all") }),
 		"catalog unknown":         task(func() (Task, error) { return app.RunCatalogApp("dev1", "nope") }),
+		"catalog terminal app":    task(func() (Task, error) { return app.RunCatalogApp("dev1", "codex") }),
 		"files vm":                task(func() (Task, error) { return app.OpenFiles("ls") }),
 		"config value":            task(func() (Task, error) { return app.ConfigureApps("dev1", AppConfig{Clipboard: "--drop"}) }),
 		"config drop":             task(func() (Task, error) { return app.ConfigureApps("dev1", AppConfig{Drop: "true"}) }),

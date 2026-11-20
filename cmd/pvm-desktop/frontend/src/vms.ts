@@ -158,21 +158,30 @@ function vmAppDialog(vm: VM): void {
               list.replaceChildren(h("p", { class: "hint" }, t.vms.noneInstalled));
               return;
             }
+            // a terminal program is listed, not started: it would start in
+            // ~, and a workspace terminal starts in the folder it works on
             const entries = apps.map((app) =>
-              h(
-                "button",
-                {
-                  type: "button",
-                  class: "menu-item",
-                  "data-tip": app.description,
-                  onclick: () => {
-                    close();
-                    void act(key, () => backend().RunCatalogApp(vm.name, app.id));
-                  },
-                },
-                icon(app.window ? "window" : "terminal"),
-                h("span", null, h("span", { lang: "en" }, app.name), !app.window && h("small", null, t.vms.inTerminal)),
-              ),
+              !app.window
+                ? h(
+                    "div",
+                    { class: "menu-item menu-item--static" },
+                    icon("terminal"),
+                    h("span", null, h("span", { lang: "en" }, app.name), h("small", null, t.vms.inTerminal)),
+                  )
+                : h(
+                    "button",
+                    {
+                      type: "button",
+                      class: "menu-item",
+                      "data-tip": app.description,
+                      onclick: () => {
+                        close();
+                        void act(key, () => backend().RunCatalogApp(vm.name, app.id));
+                      },
+                    },
+                    icon("window"),
+                    h("span", { lang: "en" }, app.name),
+                  ),
             );
             list.replaceChildren(h("div", { class: "dialog-list", role: "group", "aria-labelledby": "installed-programs" }, ...entries));
           },

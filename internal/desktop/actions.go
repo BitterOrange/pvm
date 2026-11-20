@@ -184,9 +184,9 @@ func (a *App) RunApp(name, target string) (Task, error) {
 	return a.runTask("Open an app in "+name, one(append([]string{"app", name}, args...)...)), nil
 }
 
-// RunCatalogApp starts a catalog program: one with a window through
-// `pvm app`, one for the terminal in a new terminal. The latter returns
-// a finished task without steps.
+// RunCatalogApp starts a catalog program with a window through `pvm app`.
+// A terminal program is refused: it works on the folder it starts in, and
+// this would start it in ~; a workspace terminal starts in the right one.
 func (a *App) RunCatalogApp(name, id string) (Task, error) {
 	if err := a.native(); err != nil {
 		return Task{}, err
@@ -198,13 +198,10 @@ func (a *App) RunCatalogApp(name, id string) (Task, error) {
 	if err != nil {
 		return Task{}, err
 	}
-	start := strings.Fields(entry.Start)
 	if !entry.Window {
-		if err := a.vmTerminal(append([]string{"ssh", "-t", name}, start...)...); err != nil {
-			return Task{}, err
-		}
-		return Task{Title: "Open " + entry.Name + " in " + name, Steps: []Step{}, Done: true, OK: true, Remaining: []string{}}, nil
+		return Task{}, fmt.Errorf("%s runs in a terminal, in the folder it should work on: open a workspace's terminal and run %s there", entry.Name, entry.Start)
 	}
+	start := strings.Fields(entry.Start)
 	return a.runTask("Open "+entry.Name+" in "+name, one(append([]string{"app", name, "--"}, start...)...)), nil
 }
 

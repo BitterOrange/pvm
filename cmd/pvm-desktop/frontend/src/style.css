@@ -1252,6 +1252,13 @@ textarea {
   cursor: not-allowed;
   background: transparent;
 }
+/* listed, not clickable */
+.menu-item--static,
+.menu-item--static:hover {
+  cursor: default;
+  background: transparent;
+  white-space: normal;
+}
 .menu-item small {
   display: block;
   font-size: var(--fs-micro);
