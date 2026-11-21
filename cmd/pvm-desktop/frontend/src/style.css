@@ -2780,3 +2780,9 @@ textarea {
     animation: pvm-pulse 1.4s var(--ease-in-out) infinite;
   }
 }
+
+/* the typed twin of a slider, as wide as three digits */
+.slider-num {
+  flex: none;
+  width: 72px;
+}

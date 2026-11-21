@@ -2,10 +2,10 @@ import { backend, errorText, type CatalogApp, type CreateRequest, type Image, ty
 import { banner, button, callout, command, field, focusKey, h, input, mono, redraw, select, type Child } from "./dom";
 import { onLanguage, t } from "./i18n";
 import { icon } from "./icons";
-import { cpuControl, limits, number, outside } from "./resources";
+import { cpuControl, limits, number, outside, renderControl } from "./resources";
 import { actStart, data, nav, refresh, toast } from "./store";
 import * as tasks from "./tasks";
-import { appConfigChoices, exitChoices, newAppConfig, programCard, renderCpusInput, renderCpusMax, renderCpusValue, stageBars } from "./vms";
+import { appConfigChoices, exitChoices, newAppConfig, programCard, stageBars } from "./vms";
 
 // The CLI's rules: vm.ValidateName and the user rule of vm.ValidateSpec.
 const nameRule = /^[a-zA-Z][a-zA-Z0-9_-]{0,31}$/;
@@ -23,7 +23,17 @@ const exit = select([], "");
 const clipboard = select([], "");
 const drop = select([], "");
 const audio = select([], "");
-const renderCpus = renderCpusInput(newAppConfig.render_cpus);
+// the renderer slider ends at the vCPUs chosen above; untouched it keeps
+// pvm's default
+const renderCpus = renderControl("create:render");
+function fitRender(): void {
+  renderCpus.setMost(cpus.value());
+  if (!renderCpus.touched()) {
+    renderCpus.load(newAppConfig.render_cpus);
+  }
+}
+cpus.range.addEventListener("input", fitRender);
+fitRender();
 const imageNote = h("div", { class: "slot" });
 const exitWarning = h("div", { class: "slot" });
 // memory and disk sit in one row and share the line under it
@@ -57,7 +67,7 @@ const checks: [HTMLElement, () => string][] = [
   [image, () => (image.value === "" ? t.create.imageMissing : "")],
   [user, () => (userRule.test(user.value) ? "" : t.create.userBad)],
   [exit, () => (exit.value === "" ? t.create.exitMissing : "")],
-  [renderCpus, () => (outside(renderCpus, 0, renderCpusMax) ? t.appConfig.renderCpusRange(renderCpusMax) : "")],
+  [renderCpus.num, () => (renderCpus.bad() ? t.appConfig.renderCpusRange(cpus.value()) : "")],
 ];
 
 // The slider cannot leave its range; the two typed numbers can.
@@ -176,6 +186,7 @@ export function enter(): void {
   showProblem();
   // the range ends at the host's processors, known by now
   cpus.set(cpus.value());
+  fitRender();
   const b = backend();
   b.Images().then((list) => {
     images = list;
@@ -188,6 +199,7 @@ export function enter(): void {
       }
     }
     cpus.set(typed.has(cpus.range) ? cpus.value() : d.cpus);
+    fitRender();
     const choices = exitChoices();
     setOptions(exit, choices, d.exit);
     goneExit = choices.some((c) => c.value === d.exit) ? "" : d.exit;
@@ -209,7 +221,7 @@ function request(): CreateRequest {
     disk_gb: Number(disk.value),
     exit: exit.value,
     // the default needs no step of its own
-    app_config: { clipboard: clipboard.value, drop: drop.value, audio: audio.value, render_cpus: renderCpusValue(renderCpus) === newAppConfig.render_cpus ? "" : renderCpusValue(renderCpus) },
+    app_config: { clipboard: clipboard.value, drop: drop.value, audio: audio.value, render_cpus: !renderCpus.touched() || renderCpus.value() === newAppConfig.render_cpus ? "" : renderCpus.value() },
     apps: programBoxes.filter((b) => b.checked).map((b) => b.value),
   };
 }
@@ -269,7 +281,7 @@ function label(): void {
         h("div", { class: "form-grid form-grid--2" }, field(t.appConfig.clipboard, clipboard), field(t.appConfig.drop, drop)),
         // its choices are sentences, which half a row would cut
         field(t.appConfig.audio, audio),
-        field(t.appConfig.renderCpus, renderCpus, t.appConfig.renderCpusHint),
+        renderCpus.field,
       ),
       group(c.programs, programs),
     ),
@@ -282,6 +294,7 @@ function label(): void {
     el.value = value;
   }
   cpus.label();
+  renderCpus.label();
   fillImages();
   const chosen = exit.value;
   exit.replaceChildren(...exitChoices().map((o) => h("option", { value: o.value }, o.label)));

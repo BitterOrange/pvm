@@ -26,7 +26,7 @@ import {
 import { t } from "./i18n";
 import { icon, type IconName } from "./icons";
 import * as prefs from "./prefs";
-import { cpuControl, limits, number, outside } from "./resources";
+import { cpuControl, limits, number, outside, renderControl } from "./resources";
 import { act, actStart, busy, data, memory, nav, onlyFollowed } from "./store";
 
 const stateKind = { stopped: "", starting: "info", ready: "ok", failed: "danger" } as const;
@@ -93,14 +93,6 @@ export function appConfigChoices(): Record<ChoiceSetting, { value: string; label
 // `pvm app config` has not been run for.
 export const newAppConfig: AppConfig = { clipboard: "off", drop: "off", audio: "out", render_cpus: "2" };
 
-// renderCpusMax is the daemon's bound on --render-cpus.
-export const renderCpusMax = 256;
-
-// renderCpusInput is the number field for render_cpus.
-export const renderCpusInput = (value: string): HTMLInputElement => number({ min: 0, max: renderCpusMax, value });
-
-// renderCpusValue reads the field as the backend takes it: "02" is 2.
-export const renderCpusValue = (el: HTMLInputElement): string => String(Number(el.value.trim()));
 
 // programCard is a catalog program to tick. The name and the description
 // come from the catalog as they are.
@@ -245,12 +237,16 @@ function settingsDialog(vm: VM): void {
     drop: select(choices.drop, newAppConfig.drop),
     audio: select(choices.audio, newAppConfig.audio),
   };
-  const render = renderCpusInput(newAppConfig.render_cpus);
+  // the slider ends at the VM's vCPUs
+  const render = renderControl("settings:render");
+  render.setMost(vm.cpus);
   const fields = h("div", { class: "slot" }, loading());
   let now: AppConfig | null = null;
   // an empty field is left as it is: only what differs is sent
   const changed = (name: ChoiceSetting): string => (controls[name].value === now?.[name] ? "" : controls[name].value);
-  const renderChanged = (): string => (outside(render, 0, renderCpusMax) || renderCpusValue(render) === now?.render_cpus ? "" : renderCpusValue(render));
+  // a setting the user did not move is left as it is, even one above
+  // the VM's vCPUs, which the slider shows at its end
+  const renderChanged = (): string => (!render.touched() || render.bad() || render.value() === now?.render_cpus ? "" : render.value());
   const change = (): AppConfig => ({ clipboard: changed("clipboard"), drop: changed("drop"), audio: changed("audio"), render_cpus: renderChanged() });
   const d = dialog({
     title: t.vms.settingsTitle(mono(vm.name)),
@@ -258,10 +254,10 @@ function settingsDialog(vm: VM): void {
     content: [fields],
     submit: t.vms.apply,
     // a number out of range counts as a change, so that submitting says why
-    submitState: () => ({ disabled: now === null || (Object.values(change()).join("") === "" && !outside(render, 0, renderCpusMax)) }),
+    submitState: () => ({ disabled: now === null || (Object.values(change()).join("") === "" && !render.bad()) }),
     validate: () => {
-      const bad = outside(render, 0, renderCpusMax);
-      setFieldError(render, bad ? t.appConfig.renderCpusRange(renderCpusMax) : "");
+      const bad = render.bad();
+      setFieldError(render.num, bad ? t.appConfig.renderCpusRange(vm.cpus) : "");
       return !bad;
     },
     onSubmit: () => void act(["vm:" + vm.name], () => backend().ConfigureApps(vm.name, change())),
@@ -274,12 +270,12 @@ function settingsDialog(vm: VM): void {
         controls.clipboard.value = config.clipboard;
         controls.drop.value = config.drop;
         controls.audio.value = config.audio;
-        render.value = config.render_cpus;
+        render.load(config.render_cpus);
         fields.replaceChildren(
           field(t.appConfig.clipboard, controls.clipboard),
           field(t.appConfig.drop, controls.drop, ...t.vms.dropHint(mono("~/Downloads"))),
           field(t.appConfig.audio, controls.audio),
-          field(t.appConfig.renderCpus, render, t.appConfig.renderCpusHint),
+          render.field,
         );
         controls.clipboard.focus();
       },
