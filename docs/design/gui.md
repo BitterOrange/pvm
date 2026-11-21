@@ -124,7 +124,7 @@ Actions on a VM:
 - **Files** runs `pvm app <vm> -- thunar`.
 - **Resize** changes vCPUs, memory and disk with `pvm resize <vm> [<disk-gb>] [--cpus N] [--mem MB]`, passing only what differs. The disk field refuses a smaller size. `pvm resize` takes a stopped VM, so for a running one the dialog says so and the task is `pvm stop <vm>`, the resize, then the start with its wait; a failed step leaves the rest as commands to copy.
 - **App settings** sets clipboard, drop, audio and the renderer CPUs with `pvm app config <vm> ...`. The dialog first reads what the VM has (`GET /v1/vms/{name}/apps/config`) and shows it, and passes only the flags that were changed. The settings are per VM; there is none for the host.
-  - Renderer CPUs is `--render-cpus N`: how many vCPUs the renderers of Chromium and Electron apps may use, 2 by default and 0 for no limit. It is a number field from 0 to the daemon's 256, and the dialog says that it applies to apps started afterwards.
+  - Renderer CPUs is `--render-cpus N`: how many vCPUs the renderers of Chromium and Electron apps may use, 2 by default and 0 for no limit. It is a slider from 1 to the VM's vCPUs with a number to type beside it. The end of the slider, or 0, is no limit, as a limit at or above the VM's vCPUs limits nothing; the scale under the slider names that end. An untouched control sends nothing, so a stored number above the VM's vCPUs is kept. The dialog says that it applies to apps started afterwards.
 - **Install programs** runs `pvm app install <vm> <id>...` with the catalog programs picked, on a VM that is ready.
 - **Set as default** runs `pvm default-vm <vm>`.
 
@@ -139,7 +139,7 @@ The form asks for:
   - CPUs are a slider, here and in Resize. It ends at the host's logical processors (`runtime.NumCPU` in the app, at most the daemon's 64), or at what the VM already has when that is more. At the host's count it warns that the host can freeze and offers one less.
 - The exit: `direct`, or one of the exits.
 - Clipboard, drop and audio, starting from what a new VM has: off, off and sound out. Create always passes them too, so the VM gets what the form showed.
-- Renderer CPUs, starting from pvm's default of 2. Create passes `--render-cpus` only when the number differs, as the default needs no flag.
+- Renderer CPUs, starting from pvm's default of 2. Its slider ends at the vCPUs chosen above and follows them. Create passes `--render-cpus` only when the user set a number other than the default, as the default needs no flag.
 - The programs to preinstall, from the app catalog.
 
 Create runs these steps in order, each with its output in the progress panel:

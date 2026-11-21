@@ -43,8 +43,9 @@ export const zh: Messages = {
     audioBoth: "扬声器和宿主机麦克风",
     renderCpus: "渲染进程 CPU 数",
     renderCpusHint:
-      "Chromium 和 Electron 程序（比如 Claude Desktop）的渲染进程最多使用几个 vCPU。在虚拟机里少用几个反而绘制得更快；程序的其他工作仍可用全部 vCPU。拉到虚拟机的全部 vCPU 或填 0 表示不限制。对之后启动的程序生效。",
-    renderCpusRange: (most) => "请输入 0 到 " + most + "（虚拟机的 vCPU 数）之间的整数；0 或 " + most + " 表示不限制。",
+      "只限制 Chromium 和 Electron 程序（比如 Claude Desktop）的渲染进程，程序的其他工作仍可用全部 vCPU。滑到最右或填 0 表示不限制。对之后启动的程序生效。",
+    renderCpusRange: (most) => "请输入 0 到 " + most + " 之间的整数，0 和 " + most + " 都表示不限制。",
+    renderCpusNumber: "渲染进程 CPU 数，输入数字",
     renderCpusAll: "不限制",
     renderCpusOf: (n, most) => n + " / " + most + " 个 vCPU",
   },

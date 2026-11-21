@@ -104,27 +104,39 @@ export function renderControl(key: string): RenderControl {
   let most = 1;
   let touched = false;
   const range = h("input", { type: "range", class: "slider-range", min: 1, max: 1, step: 1, id, "data-key": key, "aria-describedby": id + "-hint" });
-  const num = number({ class: "input slider-num", min: 0, max: 1, "aria-label": "" });
-  const now = h("span", { class: "slider-value" });
+  // the number stands where the vCPU slider has its value: "2 / 4"
+  const num = number({ class: "input slider-num", min: 0, max: 1, "aria-label": "", "aria-describedby": id + "-error " + id + "-hint" });
+  const of = h("span", { class: "slider-value", "aria-hidden": "true" });
+  // the scale under the track names its ends; the right one is lit when
+  // it is the setting
+  const first = h("span", null, "1");
+  const end = h("span");
+  const scale = h("div", { class: "slider-scale", "aria-hidden": "true" }, first, end);
   const name = h("label", { class: "label", for: id });
   const hint = h("p", { class: "hint", id: id + "-hint" });
   const at = () => Number(range.value);
   const unlimited = () => at() >= most;
 
   function draw(): void {
+    // one vCPU leaves the slider a single place: it is drawn full, with
+    // the thumb at the end, and only the number takes input
+    const single = most === 1;
+    range.min = single ? "0" : "1";
     range.max = String(most);
+    range.disabled = single;
     num.max = String(most);
     range.style.setProperty("--at", String(most > 1 ? (at() - 1) / (most - 1) : 1));
-    const said = unlimited() ? t.appConfig.renderCpusAll : t.appConfig.renderCpusOf(at(), most);
-    now.textContent = unlimited() ? t.appConfig.renderCpusAll : "";
-    now.hidden = !unlimited();
-    range.setAttribute("aria-valuetext", said);
+    of.textContent = "/ " + most;
+    first.hidden = single;
+    end.textContent = t.appConfig.renderCpusAll;
+    end.toggleAttribute("data-on", unlimited());
+    range.setAttribute("aria-valuetext", unlimited() ? t.appConfig.renderCpusAll : t.appConfig.renderCpusOf(at(), most));
   }
 
   function label(): void {
     name.textContent = t.appConfig.renderCpus;
     hint.textContent = t.appConfig.renderCpusHint;
-    num.setAttribute("aria-label", t.appConfig.renderCpus);
+    num.setAttribute("aria-label", t.appConfig.renderCpusNumber);
     draw();
   }
 
@@ -153,8 +165,8 @@ export function renderControl(key: string): RenderControl {
       "div",
       { class: "field" },
       name,
-      h("div", { class: "slider" }, range, num, now),
-      h("p", { class: "field-error", role: "alert" }),
+      h("div", { class: "slider slider--typed" }, range, h("span", { class: "slider-typed" }, num, of), scale),
+      h("p", { class: "field-error", role: "alert", id: id + "-error" }),
       hint,
     ),
     num,

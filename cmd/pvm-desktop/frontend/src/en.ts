@@ -48,8 +48,9 @@ export const en = {
     audioBoth: "Speakers and host microphone",
     renderCpus: "Renderer CPUs",
     renderCpusHint:
-      "How many vCPUs the renderers of Chromium and Electron programs, such as Claude Desktop, may use. In a VM, a program often draws faster with fewer; its other work keeps every vCPU. All of the VM's vCPUs, or 0, is no limit. Applies to programs started afterwards.",
-    renderCpusRange: (most: number) => "Enter a whole number from 0 to " + most + ", the VM's vCPUs; 0 or " + most + " is no limit.",
+      "Limits only the renderers of Chromium and Electron programs, such as Claude Desktop; their other work still uses every vCPU. The end of the slider, or 0, is no limit. Applies to programs started afterwards.",
+    renderCpusRange: (most: number) => "Enter a whole number from 0 to " + most + ". 0 and " + most + " both mean no limit.",
+    renderCpusNumber: "Renderer CPUs, as a number",
     renderCpusAll: "No limit",
     renderCpusOf: (n: number, most: number) => n + " of " + most + " vCPUs",
   },
