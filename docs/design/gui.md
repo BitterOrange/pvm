@@ -139,7 +139,7 @@ The form asks for:
   - CPUs are a slider, here and in Resize. It ends at the host's logical processors (`runtime.NumCPU` in the app, at most the daemon's 64), or at what the VM already has when that is more. At the host's count it warns that the host can freeze and offers one less.
 - The exit: `direct`, or one of the exits.
 - Clipboard, drop and audio, starting from what a new VM has: off, off and sound out. Create always passes them too, so the VM gets what the form showed.
-- Renderer CPUs, starting from pvm's default of 2. Its slider ends at the vCPUs chosen above and follows them. Create passes `--render-cpus` only when the user set a number other than the default, as the default needs no flag.
+- Renderer CPUs, starting from pvm's default of 2. Its slider ends at the vCPUs chosen above and follows them: a number the user set is held to the new end and comes back when the vCPUs grow again, and no limit stays no limit. Create passes `--render-cpus` only when the user set a number other than the default, as the default needs no flag.
 - The programs to preinstall, from the app catalog.
 
 Create runs these steps in order, each with its output in the progress panel:

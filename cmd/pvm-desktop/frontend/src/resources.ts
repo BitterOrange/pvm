@@ -103,6 +103,9 @@ export function renderControl(key: string): RenderControl {
   const id = "render-" + ++controls;
   let most = 1;
   let touched = false;
+  // want is the setting itself, 0 for no limit. The slider shows it held
+  // to the VM's vCPUs, so it comes back when they grow again.
+  let want = 0;
   const range = h("input", { type: "range", class: "slider-range", min: 1, max: 1, step: 1, id, "data-key": key, "aria-describedby": id + "-hint" });
   // the number stands where the vCPU slider has its value: "2 / 4"
   const num = number({ class: "input slider-num", min: 0, max: 1, "aria-label": "", "aria-describedby": id + "-error " + id + "-hint" });
@@ -141,6 +144,9 @@ export function renderControl(key: string): RenderControl {
   }
 
   function show(n: number): void {
+    want = n;
+    // the end moves before the thumb, which the old end would hold back
+    range.max = String(most);
     range.value = String(n === 0 || n >= most ? most : n);
     num.value = range.value;
     draw();
@@ -148,6 +154,7 @@ export function renderControl(key: string): RenderControl {
 
   range.addEventListener("input", () => {
     touched = true;
+    want = unlimited() ? 0 : at();
     num.value = range.value;
     num.removeAttribute("aria-invalid");
     draw();
@@ -156,6 +163,7 @@ export function renderControl(key: string): RenderControl {
     touched = true;
     if (!outside(num, 0, most)) {
       range.value = String(Number(num.value) === 0 ? most : Number(num.value));
+      want = unlimited() ? 0 : at();
       draw();
     }
   });
@@ -178,9 +186,8 @@ export function renderControl(key: string): RenderControl {
       show(Number(value));
     },
     setMost(n) {
-      const was = unlimited() ? 0 : at();
       most = Math.max(1, n);
-      show(was);
+      show(want);
     },
     label,
   };
