@@ -238,7 +238,13 @@ type AppConfig struct {
 	Clipboard string `json:"clipboard"` // off, to-guest, to-host or both
 	Drop      string `json:"drop"`      // on or off
 	Audio     string `json:"audio"`     // off, out or both
+	// RenderCPUs is the vCPUs a Chromium app's renderers may use, as a
+	// number; 0 is no limit.
+	RenderCPUs string `json:"render_cpus"`
 }
+
+// maxRenderCPUs is the daemon's bound on --render-cpus.
+const maxRenderCPUs = 256
 
 func (c AppConfig) args() ([]string, error) {
 	var args []string
@@ -257,6 +263,13 @@ func (c AppConfig) args() ([]string, error) {
 			return nil, fmt.Errorf("%s must be one of %s", f.flag, strings.Join(f.allowed, ", "))
 		}
 		args = append(args, f.flag, f.value)
+	}
+	if c.RenderCPUs != "" {
+		n, err := strconv.Atoi(c.RenderCPUs)
+		if err != nil || n < 0 || n > maxRenderCPUs || strconv.Itoa(n) != c.RenderCPUs {
+			return nil, fmt.Errorf("--render-cpus must be a number from 0 (no limit) to %d", maxRenderCPUs)
+		}
+		args = append(args, "--render-cpus", c.RenderCPUs)
 	}
 	return args, nil
 }

@@ -338,6 +338,7 @@ func TestActionArgv(t *testing.T) {
 			return app.ConfigureApps("dev1", AppConfig{Clipboard: "both", Drop: "on", Audio: "off"})
 		}), []string{"app config dev1 --clipboard both --drop on --audio off"}, ""},
 		{"app settings, one", task(func() (Task, error) { return app.ConfigureApps("dev1", AppConfig{Drop: "off"}) }), []string{"app config dev1 --drop off"}, ""},
+		{"app settings, render cpus", task(func() (Task, error) { return app.ConfigureApps("dev1", AppConfig{RenderCPUs: "0"}) }), []string{"app config dev1 --render-cpus 0"}, ""},
 		{"install", task(func() (Task, error) { return app.InstallApps("dev1", []string{"codex", "claude-desktop"}) }), []string{"app install dev1 codex claude-desktop"}, ""},
 		{"default vm", task(func() (Task, error) { return app.SetDefaultVM("dev1") }), []string{"default-vm dev1"}, ""},
 		{"clear default vm", task(app.ClearDefaultVM), []string{"default-vm --clear"}, ""},
@@ -462,6 +463,8 @@ func TestRefusals(t *testing.T) {
 		"config value":            task(func() (Task, error) { return app.ConfigureApps("dev1", AppConfig{Clipboard: "--drop"}) }),
 		"config drop":             task(func() (Task, error) { return app.ConfigureApps("dev1", AppConfig{Drop: "true"}) }),
 		"config nothing":          task(func() (Task, error) { return app.ConfigureApps("dev1", AppConfig{}) }),
+		"config render cpus":      task(func() (Task, error) { return app.ConfigureApps("dev1", AppConfig{RenderCPUs: "-1"}) }),
+		"config render cpus text": task(func() (Task, error) { return app.ConfigureApps("dev1", AppConfig{RenderCPUs: "02"}) }),
 		"install none":            task(func() (Task, error) { return app.InstallApps("dev1", nil) }),
 		"install flag":            task(func() (Task, error) { return app.InstallApps("dev1", []string{"--yes"}) }),
 		"install unknown":         task(func() (Task, error) { return app.InstallApps("dev1", []string{"nope"}) }),
@@ -572,8 +575,8 @@ func TestResizeAStoppedVM(t *testing.T) {
 func TestAppSettings(t *testing.T) {
 	f := newFixture(t)
 	for body, want := range map[string]AppConfig{
-		`{"clipboard":"off","drop":false,"audio":"out"}`: {Clipboard: "off", Drop: "off", Audio: "out"},
-		`{"clipboard":"both","drop":true,"audio":"off"}`: {Clipboard: "both", Drop: "on", Audio: "off"},
+		`{"clipboard":"off","drop":false,"audio":"out","render_cpus":2}`: {Clipboard: "off", Drop: "off", Audio: "out", RenderCPUs: "2"},
+		`{"clipboard":"both","drop":true,"audio":"off","render_cpus":0}`: {Clipboard: "both", Drop: "on", Audio: "off", RenderCPUs: "0"},
 	} {
 		f.daemon.set("/v1/vms/dev1/apps/config", body)
 		got, err := f.app.AppSettings("dev1")

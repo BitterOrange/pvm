@@ -76,8 +76,11 @@ export function exitDialog(name: string, current: string): void {
   });
 }
 
+// The settings chosen from a list; render_cpus is a number.
+type ChoiceSetting = Exclude<keyof AppConfig, "render_cpus">;
+
 // appConfigChoices are the values `pvm app config` takes.
-export function appConfigChoices(): Record<keyof AppConfig, { value: string; label: string }[]> {
+export function appConfigChoices(): Record<ChoiceSetting, { value: string; label: string }[]> {
   const c = t.appConfig;
   return {
     clipboard: [{ value: "off", label: c.off }, { value: "to-guest", label: c.toGuest }, { value: "to-host", label: c.toHost }, { value: "both", label: c.both }],
@@ -88,7 +91,16 @@ export function appConfigChoices(): Record<keyof AppConfig, { value: string; lab
 
 // What the Create form starts from: the app settings of a VM that
 // `pvm app config` has not been run for.
-export const newAppConfig: AppConfig = { clipboard: "off", drop: "off", audio: "out" };
+export const newAppConfig: AppConfig = { clipboard: "off", drop: "off", audio: "out", render_cpus: "2" };
+
+// renderCpusMax is the daemon's bound on --render-cpus.
+export const renderCpusMax = 256;
+
+// renderCpusInput is the number field for render_cpus.
+export const renderCpusInput = (value: string): HTMLInputElement => number({ min: 0, max: renderCpusMax, value });
+
+// renderCpusValue reads the field as the backend takes it: "02" is 2.
+export const renderCpusValue = (el: HTMLInputElement): string => String(Number(el.value.trim()));
 
 // programCard is a catalog program to tick. The name and the description
 // come from the catalog as they are.
@@ -228,22 +240,30 @@ function installDialog(vm: VM): void {
 // them first and shows what is set now.
 function settingsDialog(vm: VM): void {
   const choices = appConfigChoices();
-  const controls: Record<keyof AppConfig, HTMLSelectElement> = {
+  const controls: Record<ChoiceSetting, HTMLSelectElement> = {
     clipboard: select(choices.clipboard, newAppConfig.clipboard),
     drop: select(choices.drop, newAppConfig.drop),
     audio: select(choices.audio, newAppConfig.audio),
   };
+  const render = renderCpusInput(newAppConfig.render_cpus);
   const fields = h("div", { class: "slot" }, loading());
   let now: AppConfig | null = null;
   // an empty field is left as it is: only what differs is sent
-  const changed = (name: keyof AppConfig): string => (controls[name].value === now?.[name] ? "" : controls[name].value);
-  const change = (): AppConfig => ({ clipboard: changed("clipboard"), drop: changed("drop"), audio: changed("audio") });
+  const changed = (name: ChoiceSetting): string => (controls[name].value === now?.[name] ? "" : controls[name].value);
+  const renderChanged = (): string => (outside(render, 0, renderCpusMax) || renderCpusValue(render) === now?.render_cpus ? "" : renderCpusValue(render));
+  const change = (): AppConfig => ({ clipboard: changed("clipboard"), drop: changed("drop"), audio: changed("audio"), render_cpus: renderChanged() });
   const d = dialog({
     title: t.vms.settingsTitle(mono(vm.name)),
     text: [t.vms.settingsText],
     content: [fields],
     submit: t.vms.apply,
-    submitState: () => ({ disabled: now === null || Object.values(change()).join("") === "" }),
+    // a number out of range counts as a change, so that submitting says why
+    submitState: () => ({ disabled: now === null || (Object.values(change()).join("") === "" && !outside(render, 0, renderCpusMax)) }),
+    validate: () => {
+      const bad = outside(render, 0, renderCpusMax);
+      setFieldError(render, bad ? t.appConfig.renderCpusRange(renderCpusMax) : "");
+      return !bad;
+    },
     onSubmit: () => void act(["vm:" + vm.name], () => backend().ConfigureApps(vm.name, change())),
   });
   backend()
@@ -254,10 +274,12 @@ function settingsDialog(vm: VM): void {
         controls.clipboard.value = config.clipboard;
         controls.drop.value = config.drop;
         controls.audio.value = config.audio;
+        render.value = config.render_cpus;
         fields.replaceChildren(
           field(t.appConfig.clipboard, controls.clipboard),
           field(t.appConfig.drop, controls.drop, ...t.vms.dropHint(mono("~/Downloads"))),
           field(t.appConfig.audio, controls.audio),
+          field(t.appConfig.renderCpus, render, t.appConfig.renderCpusHint),
         );
         controls.clipboard.focus();
       },

@@ -29,7 +29,7 @@ const appUsage = `[<vm>] <url> [--name ID] [--kiosk] [--no-attach] [--yes]
        pvm app install [<vm>] <id>... [--yes]
        pvm app stop [<vm>] [<id> | --all]
        pvm app attach [<vm>] [--yes]
-       pvm app config [<vm>] [--clipboard off|to-guest|to-host|both] [--drop on|off] [--audio off|out|both]`
+       pvm app config [<vm>] [--clipboard off|to-guest|to-host|both] [--drop on|off] [--audio off|out|both] [--render-cpus N]`
 
 type appView struct {
 	VM    string   `json:"vm"`
@@ -200,11 +200,12 @@ func CmdApp(args []string) int {
 		fmt.Printf("xpra client started for %s\n", vmName)
 		return 0
 	case "config":
-		const usage = "[<vm>] [--clipboard off|to-guest|to-host|both] [--drop on|off] [--audio off|out|both]"
+		const usage = "[<vm>] [--clipboard off|to-guest|to-host|both] [--drop on|off] [--audio off|out|both] [--render-cpus N]"
 		fs := newFlagSet("app config", usage)
 		clip := fs.String("clipboard", "", "off, to-guest (host to vm), to-host (vm to host) or both")
 		drop := fs.String("drop", "", "on: files dropped on the vm's windows upload into ~/Downloads in the vm")
 		audio := fs.String("audio", "", "out (vm sound on the host speakers), both (also the host microphone into the vm) or off")
+		renderCPUs := fs.Int("render-cpus", -1, "vCPUs the renderers of Chromium and Electron apps may use (default 2; 0: no limit)")
 		if err := fs.Parse(flagsFirst(fs, args[1:])); err != nil {
 			return 2
 		}
@@ -221,6 +222,11 @@ func CmdApp(args []string) int {
 		if *audio != "" {
 			body["audio"] = *audio
 		}
+		if *renderCPUs >= 0 {
+			body["render_cpus"] = *renderCPUs
+		} else if *renderCPUs != -1 {
+			return fatalf("--render-cpus must be 0 (no limit) or more")
+		}
 		c, err := ensureDaemon(p)
 		if err != nil {
 			return fatalf("%v", err)
@@ -230,9 +236,10 @@ func CmdApp(args []string) int {
 			return fatalf("%v", err)
 		}
 		var out struct {
-			Clipboard string `json:"clipboard"`
-			Drop      bool   `json:"drop"`
-			Audio     string `json:"audio"`
+			Clipboard  string `json:"clipboard"`
+			Drop       bool   `json:"drop"`
+			Audio      string `json:"audio"`
+			RenderCPUs int    `json:"render_cpus"`
 		}
 		if err := c.Put("/v1/vms/"+vmName+"/apps/config", body, &out); err != nil {
 			return fatalf("%v", err)
@@ -241,7 +248,11 @@ func CmdApp(args []string) int {
 		if out.Drop {
 			dropS = "on"
 		}
-		fmt.Printf("%s: clipboard %s, drop %s, audio %s\n", vmName, out.Clipboard, dropS, out.Audio)
+		renderS := "no limit"
+		if out.RenderCPUs > 0 {
+			renderS = strconv.Itoa(out.RenderCPUs)
+		}
+		fmt.Printf("%s: clipboard %s, drop %s, audio %s, render cpus %s\n", vmName, out.Clipboard, dropS, out.Audio, renderS)
 		if out.Clipboard == "to-guest" || out.Clipboard == "both" {
 			fmt.Println("host clipboard content enters the vm when one of its windows comes to the front, and when you copy while it is there")
 		}
@@ -250,6 +261,10 @@ func CmdApp(args []string) int {
 		}
 		if out.Drop {
 			fmt.Println("files dropped on its windows upload into ~/Downloads in the vm; files the vm sends need your confirmation")
+		}
+		if _, ok := body["render_cpus"]; ok {
+			fmt.Println("render cpus apply to apps started from now on")
+			delete(body, "render_cpus")
 		}
 		if len(body) > 0 {
 			fmt.Printf("it applies to clients attached from now on: pvm app attach %s\n", vmName)

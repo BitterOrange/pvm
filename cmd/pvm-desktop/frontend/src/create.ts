@@ -5,7 +5,7 @@ import { icon } from "./icons";
 import { cpuControl, limits, number, outside } from "./resources";
 import { actStart, data, nav, refresh, toast } from "./store";
 import * as tasks from "./tasks";
-import { appConfigChoices, exitChoices, newAppConfig, programCard, stageBars } from "./vms";
+import { appConfigChoices, exitChoices, newAppConfig, programCard, renderCpusInput, renderCpusMax, renderCpusValue, stageBars } from "./vms";
 
 // The CLI's rules: vm.ValidateName and the user rule of vm.ValidateSpec.
 const nameRule = /^[a-zA-Z][a-zA-Z0-9_-]{0,31}$/;
@@ -23,6 +23,7 @@ const exit = select([], "");
 const clipboard = select([], "");
 const drop = select([], "");
 const audio = select([], "");
+const renderCpus = renderCpusInput(newAppConfig.render_cpus);
 const imageNote = h("div", { class: "slot" });
 const exitWarning = h("div", { class: "slot" });
 // memory and disk sit in one row and share the line under it
@@ -56,6 +57,7 @@ const checks: [HTMLElement, () => string][] = [
   [image, () => (image.value === "" ? t.create.imageMissing : "")],
   [user, () => (userRule.test(user.value) ? "" : t.create.userBad)],
   [exit, () => (exit.value === "" ? t.create.exitMissing : "")],
+  [renderCpus, () => (outside(renderCpus, 0, renderCpusMax) ? t.appConfig.renderCpusRange(renderCpusMax) : "")],
 ];
 
 // The slider cannot leave its range; the two typed numbers can.
@@ -206,7 +208,8 @@ function request(): CreateRequest {
     mem_mb: Number(mem.value),
     disk_gb: Number(disk.value),
     exit: exit.value,
-    app_config: { clipboard: clipboard.value, drop: drop.value, audio: audio.value },
+    // the default needs no step of its own
+    app_config: { clipboard: clipboard.value, drop: drop.value, audio: audio.value, render_cpus: renderCpusValue(renderCpus) === newAppConfig.render_cpus ? "" : renderCpusValue(renderCpus) },
     apps: programBoxes.filter((b) => b.checked).map((b) => b.value),
   };
 }
@@ -266,6 +269,7 @@ function label(): void {
         h("div", { class: "form-grid form-grid--2" }, field(t.appConfig.clipboard, clipboard), field(t.appConfig.drop, drop)),
         // its choices are sentences, which half a row would cut
         field(t.appConfig.audio, audio),
+        field(t.appConfig.renderCpus, renderCpus, t.appConfig.renderCpusHint),
       ),
       group(c.programs, programs),
     ),

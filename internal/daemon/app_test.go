@@ -80,9 +80,10 @@ func TestAppScriptsParse(t *testing.T) {
 	scripts := map[string]string{
 		"install": appInstallScript(true),
 		"server":  appServerScript(),
-		"cmd":     appLaunchScript(&appRecord{ID: "gedit", Kind: "cmd", Argv: []string{"gedit", "it's a file; rm -rf ~", "$(id)"}}, "", ""),
-		"cwd":     appLaunchScript(&appRecord{ID: "gedit", Kind: "cmd", Argv: []string{"gedit"}}, "/workspace/web/it's a dir; $(id)", "/workspace/web"),
-		"url":     appLaunchScript(&appRecord{ID: "mail", Kind: "url", URL: "https://example.com/?a=1&b='2'", Kiosk: true}, "", ""),
+		"cmd":     appLaunchScript(&appRecord{ID: "gedit", Kind: "cmd", Argv: []string{"gedit", "it's a file; rm -rf ~", "$(id)"}}, "", "", 0),
+		"cwd":     appLaunchScript(&appRecord{ID: "gedit", Kind: "cmd", Argv: []string{"gedit"}}, "/workspace/web/it's a dir; $(id)", "/workspace/web", 0),
+		"pin":     appLaunchScript(&appRecord{ID: "claude", Kind: "cmd", Argv: []string{"claude-desktop"}}, "", "", 2),
+		"url":     appLaunchScript(&appRecord{ID: "mail", Kind: "url", URL: "https://example.com/?a=1&b='2'", Kiosk: true}, "", "", 0),
 		"stop":    appStopScript([]appRecord{{ID: "gedit"}, {ID: "mail", Kind: "url", Window: "0x00c00003"}}, false),
 	}
 	for name, s := range scripts {
@@ -102,6 +103,17 @@ func TestAppScriptsParse(t *testing.T) {
 	// GTK apps leave their title bar to the host when gtk3-nocsd is there
 	if !strings.Contains(scripts["cmd"], `$nocsd -- "$prog" $nogpu "$@"`) || !strings.Contains(scripts["cmd"], "v8_context_snapshot.bin") || !strings.Contains(scripts["install"], "install -y --no-install-recommends gtk3-nocsd") {
 		t.Errorf("gtk3-nocsd not installed or preloaded: %s | %s", scripts["install"], scripts["cmd"])
+	}
+	// a Chromium app's zygotes and renderers go on vCPUs 0-1, every
+	// thread, and only when the VM has more; without a limit nothing is
+	// pinned
+	for _, want := range []string{`taskset -a -p -c 0-1 "$p"`, `*" --type=zygote "*|*" --type=renderer "*)`, `[ "$(nproc)" -gt 2 ]`, `[ -n "$nogpu" ]`, appRenderUnpinned} {
+		if !strings.Contains(scripts["pin"], want) {
+			t.Errorf("pin launch lacks %q:\n%s", want, scripts["pin"])
+		}
+	}
+	if strings.Contains(scripts["cmd"], "taskset") {
+		t.Errorf("cmd without a limit pins:\n%s", scripts["cmd"])
 	}
 	// every web app shares one profile; a running Firefox gets a new window
 	url := scripts["url"]
@@ -168,7 +180,7 @@ func TestAppLaunchDisablesGPUForChromium(t *testing.T) {
 		{"plain", []string{"plain", "a b", "$(id)"}},
 		{"electron", []string{"electron", "--disable-gpu", "a b", "$(id)"}},
 	} {
-		script := appLaunchScript(&appRecord{ID: "x", Kind: "cmd", Argv: []string{tc.prog, "a b", "$(id)"}}, "", "")
+		script := appLaunchScript(&appRecord{ID: "x", Kind: "cmd", Argv: []string{tc.prog, "a b", "$(id)"}}, "", "", 0)
 		c := exec.Command("sh", "-c", script)
 		c.Env = append(os.Environ(), "PATH="+bin+":/usr/bin:/bin")
 		if out, err := c.CombinedOutput(); err != nil {
@@ -209,7 +221,7 @@ func TestAppLaunchWorkingDirectory(t *testing.T) {
 		{"missing root", gone, gone, "", appCwdMissing, 4},
 	} {
 		os.Remove(opts)
-		c := exec.Command("sh", "-c", appLaunchScript(&appRecord{ID: "x", Kind: "cmd", Argv: []string{"plain"}}, tc.cwd, tc.root))
+		c := exec.Command("sh", "-c", appLaunchScript(&appRecord{ID: "x", Kind: "cmd", Argv: []string{"plain"}}, tc.cwd, tc.root, 0))
 		c.Env = append(os.Environ(), "PATH="+bin+":/usr/bin:/bin")
 		out, err := c.Output()
 		if c.ProcessState.ExitCode() != tc.wantExit {
@@ -303,12 +315,22 @@ func TestAppConfigRoutes(t *testing.T) {
 		}
 		return strings.TrimSpace(rr.Body.String())
 	}
-	if got, want := call("GET", ""), `{"audio":"out","clipboard":"off","drop":false}`; got != want {
+	if got, want := call("GET", ""), `{"audio":"out","clipboard":"off","drop":false,"render_cpus":2}`; got != want {
 		t.Errorf("a vm without app state: %s, want %s", got, want)
 	}
-	set := call("PUT", `{"clipboard":"both","drop":true,"audio":"off"}`)
-	if got := call("GET", ""); got != set || got != `{"audio":"off","clipboard":"both","drop":true}` {
+	set := call("PUT", `{"clipboard":"both","drop":true,"audio":"off","render_cpus":0}`)
+	if got := call("GET", ""); got != set || got != `{"audio":"off","clipboard":"both","drop":true,"render_cpus":0}` {
 		t.Errorf("after the change: GET %s, PUT answered %s", got, set)
+	}
+	if got := call("PUT", `{"render_cpus":4}`); got != `{"audio":"off","clipboard":"both","drop":true,"render_cpus":4}` {
+		t.Errorf("render cpus 4: %s", got)
+	}
+	for _, body := range []string{`{"render_cpus":-1}`, `{"render_cpus":257}`} {
+		rr := httptest.NewRecorder()
+		s.handler().ServeHTTP(rr, httptest.NewRequest("PUT", "/v1/vms/dev1/apps/config", strings.NewReader(body)))
+		if rr.Code != 400 || !strings.Contains(rr.Body.String(), "--render-cpus") {
+			t.Errorf("%s: %d %s", body, rr.Code, rr.Body.String())
+		}
 	}
 	rr := httptest.NewRecorder()
 	s.handler().ServeHTTP(rr, httptest.NewRequest("GET", "/v1/vms/dev2/apps/config", nil))

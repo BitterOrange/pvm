@@ -72,6 +72,24 @@ type appState struct {
 	Audio string `json:"audio,omitempty"`
 	// Installed are the catalog apps `pvm app install` put into the VM.
 	Installed []string `json:"installed,omitempty"`
+	// RenderCPUs is how many vCPUs the renderers of a Chromium app may
+	// use; nil is defaultRenderCPUs and 0 is no limit.
+	RenderCPUs *int `json:"render_cpus,omitempty"`
+}
+
+// defaultRenderCPUs: in a 10-vCPU WHPX VM, Claude Desktop scrolled and
+// redrew visibly faster with its renderers on 2 vCPUs than on all of
+// them, and slower on 1.
+const defaultRenderCPUs = 2
+
+// maxRenderCPUs bounds the setting; QEMU caps a VM's vCPUs lower.
+const maxRenderCPUs = 256
+
+func (st *appState) renderCPUs() int {
+	if st.RenderCPUs == nil {
+		return defaultRenderCPUs
+	}
+	return *st.RenderCPUs
 }
 
 var clipboardModes = []string{"off", "to-guest", "to-host", "both"}
@@ -94,7 +112,7 @@ func (st *appState) clipboard() string {
 
 // policy is the answer of the app config routes, with the defaults named.
 func (st *appState) policy() map[string]any {
-	return map[string]any{"clipboard": st.clipboard(), "drop": st.Drop, "audio": st.audio()}
+	return map[string]any{"clipboard": st.clipboard(), "drop": st.Drop, "audio": st.audio(), "render_cpus": st.renderCPUs()}
 }
 
 // clipToGuest reports whether host clipboard content may enter the VM.
@@ -422,6 +440,30 @@ bin=$(readlink -f "$(command -v "$1")")
 [ -f "${bin%/*}/v8_context_snapshot.bin" ] && nogpu=--disable-gpu
 `
 
+// appRenderUnpinned is the line the launch script prints when it was to
+// limit a Chromium app's renderers and found none.
+const appRenderUnpinned = "RENDER_UNPINNED"
+
+// appRenderPin defines pin_render, which puts the zygotes and renderers
+// of the app's unit on vCPUs 0 to n-1, every thread of them. Renderers
+// fork from the zygotes and inherit it; the browser, GPU and utility
+// processes keep every vCPU, and so do programs the app runs, such as
+// Claude Desktop's Claude Code. Software drawing on many vCPUs was slower
+// under WHPX, where vCPU exits are costly, than on a few.
+func appRenderPin(unit string, n int) string {
+	return `pin_render() {
+  cg=/sys/fs/cgroup$(systemctl --user show -p ControlGroup --value ` + unit + `)
+  pinned=
+  for p in $(cat "$cg/cgroup.procs" 2>/dev/null); do
+    case " $(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null) " in
+      *" --type=zygote "*|*" --type=renderer "*) taskset -a -p -c 0-` + strconv.Itoa(n-1) + ` "$p" >/dev/null 2>&1 && pinned=1 ;;
+    esac
+  done
+  [ -n "$pinned" ]
+}
+`
+}
+
 // Lines the launch script prints about the working directory.
 const (
 	appCwdFallback = "CWD_FALLBACK"
@@ -447,7 +489,9 @@ fi
 // appLaunchScript starts app as a user unit on the Xpra display and fails
 // if it exits within the first seconds; web apps go to webappLaunchScript.
 // A command starts in cwd when one is given.
-func appLaunchScript(a *appRecord, cwd, root string) string {
+// A Chromium app's renderers are limited to renderCPUs vCPUs when the VM
+// has more; 0 is no limit.
+func appLaunchScript(a *appRecord, cwd, root string, renderCPUs int) string {
 	if a.Kind == "url" {
 		return webappLaunchScript(a)
 	}
@@ -455,6 +499,20 @@ func appLaunchScript(a *appRecord, cwd, root string) string {
 	workDir, workDirOpt := "", ""
 	if cwd != "" {
 		workDir, workDirOpt = appWorkDir(cwd, root), ` --working-directory="$dir"`
+	}
+	pin, pinWait, pinAgain := "", "", ""
+	if renderCPUs > 0 {
+		// the zygotes are pinned as soon as they show, before most
+		// renderers fork; a renderer forked before that is pinned after
+		pin = appRenderPin(unit, renderCPUs) + `limit=
+[ -n "$nogpu" ] && [ "$(nproc)" -gt ` + strconv.Itoa(renderCPUs) + ` ] && limit=1
+`
+		pinWait = `if [ -n "$limit" ]; then
+  for i in $(seq 1 50); do pin_render && break; sleep 0.2; done
+fi
+`
+		pinAgain = `if [ -n "$limit" ] && ! pin_render; then echo "` + appRenderUnpinned + `"; fi
+`
 	}
 	words := make([]string, len(a.Argv))
 	for i, w := range a.Argv {
@@ -466,17 +524,17 @@ if ! command -v "$1" >/dev/null 2>&1; then
   echo "NOT_INSTALLED"
   exit 3
 fi
-` + workDir + appNoCSD + appChromium + `prog=$1
+` + workDir + appNoCSD + appChromium + pin + `prog=$1
 shift
 systemctl --user reset-failed ` + unit + ` >/dev/null 2>&1 || true
 systemd-run --user --quiet --collect --unit=` + unit + workDirOpt + ` -E DISPLAY=` + appDisplay + ` $nocsd -- "$prog" $nogpu "$@"
-sleep 2
+` + pinWait + `sleep 2
 if ! systemctl --user is-active --quiet ` + unit + `; then
   echo "app exited right away:" >&2
   journalctl --user -u ` + unit + ` -n 30 --no-pager >&2 || true
   exit 1
 fi
-`
+` + pinAgain
 }
 
 // appID derives an id from the command or URL when none is given.
@@ -740,7 +798,7 @@ func (s *Server) handleAppStart(w http.ResponseWriter, r *http.Request) {
 			log.Printf("app %s/%s: roll back record: %v", spec.Name, id, err)
 		}
 	}
-	out, err := s.sshRunCtx(ctx, spec, appLaunchScript(&rec, req.Cwd, req.CwdRoot))
+	out, err := s.sshRunCtx(ctx, spec, appLaunchScript(&rec, req.Cwd, req.CwdRoot, st.renderCPUs()))
 	if err != nil {
 		rollback()
 		if hasLine(out, appCwdMissing) {
@@ -798,6 +856,9 @@ func (s *Server) handleAppStart(w http.ResponseWriter, r *http.Request) {
 	note := ""
 	if hasLine(out, appCwdFallback) {
 		note = fmt.Sprintf("%s is not in the vm; starting in %s", req.Cwd, req.CwdRoot)
+	}
+	if hasLine(out, appRenderUnpinned) {
+		log.Printf("app %s/%s: no Chromium renderer found to limit to %d vCPUs", spec.Name, id, st.renderCPUs())
 	}
 	writeJSON(w, 201, appStartResponse{App: appView{VM: spec.Name, appRecord: rec, State: "running"}, Attach: att, Note: note})
 }
@@ -1060,9 +1121,10 @@ func (s *Server) handleAppConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Clipboard string `json:"clipboard"`
-		Drop      *bool  `json:"drop"`
-		Audio     string `json:"audio"`
+		Clipboard  string `json:"clipboard"`
+		Drop       *bool  `json:"drop"`
+		Audio      string `json:"audio"`
+		RenderCPUs *int   `json:"render_cpus"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, fmt.Errorf("bad request: %v", err))
@@ -1097,6 +1159,17 @@ func (s *Server) handleAppConfig(w http.ResponseWriter, r *http.Request) {
 		st.Audio = req.Audio
 		if st.Audio == "out" {
 			st.Audio = ""
+		}
+	}
+	if req.RenderCPUs != nil {
+		n := *req.RenderCPUs
+		if n < 0 || n > maxRenderCPUs {
+			writeErr(w, 400, fmt.Errorf("--render-cpus must be 0 (no limit) to %d", maxRenderCPUs))
+			return
+		}
+		st.RenderCPUs = &n
+		if n == defaultRenderCPUs {
+			st.RenderCPUs = nil
 		}
 	}
 	if err := s.saveAppState(name, st); err != nil {
