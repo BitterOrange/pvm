@@ -82,8 +82,8 @@ export interface RenderControl {
   field: HTMLElement;
   // num is the typed number, which carries the field's error.
   num: HTMLInputElement;
-  // value is the setting as --render-cpus takes it: the end of the
-  // slider, all of the VM's vCPUs, is 0, no limit.
+  // value is the setting as --render-cpus takes it, 0 for no limit:
+  // the end of the slider, or a number held there by fewer vCPUs.
   value(): string;
   // touched is set once the user moves or types it.
   touched(): boolean;
@@ -178,7 +178,8 @@ export function renderControl(key: string): RenderControl {
       hint,
     ),
     num,
-    value: () => (unlimited() ? "0" : range.value),
+    // the setting, not the thumb: a number held to fewer vCPUs is kept
+    value: () => String(want),
     touched: () => touched,
     bad: () => outside(num, 0, most),
     load(value) {
