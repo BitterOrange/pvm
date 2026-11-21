@@ -19,32 +19,22 @@
 
 已完成：
 
-- [x] 按用户安装的 Windows 安装包（v1.1.6）
-- [x] 工作区：`mount`、`sync` 和 `copy`（v1.1.7）
-- [x] golden 镜像自带 Firefox 和 sshfs（v1.1.7）
-- [x] `pvm app`：虚拟机里的程序和网页作为宿主机窗口（v1.2.0）
-- [x] `pvm.stream` 通道，以及更快的 `pvm desktop`（v1.2.0）
-- [x] 原生 Windows 上的 UDP 和 UDP 出口（v1.2.0）
-- [x] Windows 安装包自带 Xpra 客户端（v1.2.0）
-- [x] 默认使用当前工作区的虚拟机，`pvm ssh` 进入对应目录，虚拟机未启动时询问是否启动（v1.2.1）
-- [x] `pvm app` 窗口使用宿主机窗口边框，Chromium 类应用不走 GPU 渲染（v1.2.1）
-- [x] golden 镜像自带各主要文字的字体和彩色 emoji（v1.2.1）
-- [x] `pvm app` 支持声音、剪贴板复制文件和 emoji 输入，GTK 应用约一秒打开（v1.2.2）
-- [x] CI 在 Windows runner 上跑单元测试（v1.2.2）
-- [x] PVM Desktop：原生 Windows 上管理虚拟机、出口和工作区的图形应用，随安装包发布（v1.3.0）
-- [x] 保存的默认虚拟机、`pvm ls` 显示就绪状态，以及用 `pvm app install` 安装内置应用（v1.3.0）
-- [x] 合并上游：内核参数与端口映射加固、旧虚拟机上的 `pvm desktop`、macOS 的 uid 和更严格的停止错误处理（v1.3.1）
-- [x] `pvm resize --cpus/--mem`，以及在 PVM Desktop 里调整虚拟机资源（v1.3.2）
-- [x] 在 PVM Desktop 里关闭 daemon，在虚拟机内检测已安装的应用，应用目录加入 Firefox（v1.3.3）
+- [x] 按用户安装的 Windows 安装包；工作区（`mount`、`sync`、`copy`）；golden 镜像自带 Firefox 和 sshfs（v1.1.6-1.1.7）
+- [x] `pvm app`（虚拟机里的程序和网页作为宿主机窗口）、`pvm.stream` 通道和更快的 `pvm desktop`、原生 Windows 上的 UDP 出口、安装包自带 Xpra 客户端（v1.2.0）
+- [x] 默认使用当前工作区的虚拟机；`pvm app` 支持宿主机窗口边框、声音、剪贴板文件、emoji 和各主要文字的字体；CI 跑 Windows 单元测试（v1.2.1-1.2.2）
+- [x] 原生 Windows 上的 PVM Desktop、保存的默认虚拟机、应用目录与 `pvm app install`；合并上游（v1.3.0-1.3.1）
+- [x] `pvm resize` 和 PVM Desktop 可调 vCPU 与内存、在 PVM Desktop 里关闭 daemon、在虚拟机内检测已安装的应用、应用目录加入 Firefox（v1.3.2-1.3.3）
 
 计划中：
 
-- [ ] `pvm exit-agent install|uninstall`，注册为 systemd 服务
-- [ ] `pvm app` 在 macOS 和 Linux 上支持宿主机到虚拟机的剪贴板，支持 WSL2，并让输入法输入稳定可靠
-- [ ] 输入法候选框跟随应用的文本光标
+- [ ] 正式名称：Proxied Virtual Machine (PVM)，待与上游确认
+- [ ] WHPX：虚拟机内可用 AVX，并按虚拟机选择 QEMU（自带或自编译版，或系统里的官方版）
+- [ ] `pvm app`：密钥环改为设置项，默认 `off`，可选 `host`（加密存放、由宿主机解锁），需验证 Claude Desktop 正常使用
+- [ ] `pvm app`：macOS 和 Linux 上宿主机到虚拟机的剪贴板、WSL2、稳定的输入法输入，以及跟随文本光标的候选框
 - [ ] `pvm desktop` 像 `pvm app` 一样作为宿主机窗口打开，并在虚拟机文件管理器里打开工作区目录
+- [ ] PVM Desktop：在 Windows 上测试安装包、虚拟机未启动时保留工作区表单、资源管理器右键菜单"创建 PVM 工作区"、托盘图标，以及快照、端口映射和挂载的界面
+- [ ] `pvm exit-agent install|uninstall`，注册为 systemd 服务
 - [ ] Windows CI：其余包的测试，以及打 tag 时对安装包做冒烟测试
-- [ ] PVM Desktop：在 Windows 上测试安装包、托盘图标，以及快照、端口映射和挂载的界面
 
 候选：
 
@@ -52,6 +42,7 @@
 - [ ] `pvm exit test` 增加出网探测
 - [ ] 默认镜像
 - [ ] 端口映射改走 `pvm.stream`，不再经过 gateway 虚拟机
+- [ ] 出口有序列表与故障切换，保持 kill-switch fail-closed
 - [ ] 修复 gateway 规则漂移误报
 - [ ] 在 self-hosted runner 上跑 WHPX 端到端测试
 
@@ -167,7 +158,7 @@ pvm app catalog
 pvm app install dev1 claude-code codex claude-desktop
 ```
 
-剪贴板和拖放默认关闭，需按虚拟机单独开启。使用 `--clipboard to-guest` 或 `both` 时，宿主机内容只在该虚拟机的窗口切到前台、或窗口在前台时复制，才会进入虚拟机；被密码管理器标记为排除的内容永远不会发送。文本、图片，以及在 Windows 宿主机上的文件和文件夹，都可以双向复制粘贴。用宿主机输入法（比如微软拼音）输入的中文，或表情面板里的 emoji，也能正常输入到应用里。声音从宿主机扬声器播放；`--audio both` 还会把宿主机的麦克风借给虚拟机。详见 [docs/design/app.md](docs/design/app.md)。
+剪贴板和拖放默认关闭，需按虚拟机单独开启。使用 `--clipboard to-guest` 或 `both` 时，宿主机内容只在该虚拟机的窗口切到前台、或窗口在前台时复制，才会进入虚拟机；被密码管理器标记为排除的内容永远不会发送。文本、图片，以及在 Windows 宿主机上的文件和文件夹，都可以双向复制粘贴。用宿主机输入法（比如微软拼音）输入的中文，或表情面板里的 emoji，也能正常输入到应用里。声音从宿主机扬声器播放；`--audio both` 还会把宿主机的麦克风借给虚拟机。Chromium 和 Electron 应用（比如 Claude Desktop）的渲染进程只用 2 个 vCPU，在虚拟机里比用满全部 vCPU 绘制得更快；`--render-cpus N` 修改这个数，对之后启动的应用生效，`0` 表示不限制。详见 [docs/design/app.md](docs/design/app.md)。
 
 `pvm app catalog` 列出 pvm 可以代为安装的应用：Claude Code、Codex CLI、Claude Desktop 和 Firefox，均为厂商官方的 Linux 版本。`pvm app install [<vm>] <id>...` 在虚拟机内以 root 运行该应用的内置安装脚本；下载只发生在虚拟机里，经它的出口出网，不经过宿主机。`pvm app ls` 还会显示每台虚拟机里已有的目录应用，包括随镜像预装或手动安装的。
 

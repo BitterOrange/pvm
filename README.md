@@ -19,32 +19,22 @@ Personal QEMU dev VMs in a single binary: create an isolated Linux development m
 
 Shipped:
 
-- [x] Per-user Windows installers (v1.1.6)
-- [x] Workspaces: `mount`, `sync` and `copy` (v1.1.7)
-- [x] Firefox and sshfs in golden images (v1.1.7)
-- [x] `pvm app`: VM programs and web pages as host windows (v1.2.0)
-- [x] The `pvm.stream` channel and a faster `pvm desktop` (v1.2.0)
-- [x] UDP and UDP exits on native Windows (v1.2.0)
-- [x] Xpra client in the Windows installers (v1.2.0)
-- [x] The VM of the current workspace by default, `pvm ssh` in the matching folder, and an offer to start a stopped VM (v1.2.1)
-- [x] Host window frames for `pvm app` windows, and Chromium apps without the GPU path (v1.2.1)
-- [x] Fonts for all major scripts and color emoji in golden images (v1.2.1)
-- [x] Sound, copied files on the clipboard and emoji input for `pvm app`, and GTK apps that open in a second (v1.2.2)
-- [x] Unit tests on a Windows runner in CI (v1.2.2)
-- [x] PVM Desktop, a graphical app for VMs, exits and workspaces on native Windows, in the installers (v1.3.0)
-- [x] A stored default VM, readiness in `pvm ls`, and built-in apps with `pvm app install` (v1.3.0)
-- [x] Upstream merged: kernel-arg and port-map hardening, `pvm desktop` on older VMs, macOS uid and stricter stop errors (v1.3.1)
-- [x] `pvm resize --cpus/--mem` and resizing a VM in PVM Desktop (v1.3.2)
-- [x] Stopping the daemon from PVM Desktop, and installed apps detected in the VM, with Firefox in the catalog (v1.3.3)
+- [x] Per-user Windows installers; workspaces (`mount`, `sync`, `copy`); Firefox and sshfs in golden images (v1.1.6-1.1.7)
+- [x] `pvm app` (VM programs and web pages as host windows), the `pvm.stream` channel and a faster `pvm desktop`, UDP exits on native Windows, the Xpra client in the installers (v1.2.0)
+- [x] The current workspace's VM by default; `pvm app` with host window frames, sound, file clipboard, emoji and fonts for all scripts; Windows unit tests in CI (v1.2.1-1.2.2)
+- [x] PVM Desktop on native Windows, a stored default VM, the app catalog with `pvm app install`; upstream merged (v1.3.0-1.3.1)
+- [x] vCPUs and memory in `pvm resize` and PVM Desktop, stopping the daemon from PVM Desktop, installed apps found in the VM, Firefox in the catalog (v1.3.2-1.3.3)
 
 Planned:
 
-- [ ] `pvm exit-agent install|uninstall` as a systemd service
-- [ ] Host-to-guest clipboard for `pvm app` on macOS and Linux, `pvm app` on WSL2, and reliable input method text
-- [ ] Input method candidates that follow the app's text cursor
+- [ ] The full name: Proxied Virtual Machine (PVM), to be agreed upstream
+- [ ] WHPX: AVX in VMs, and a QEMU chosen per VM (the bundled or own build, or the system's)
+- [ ] `pvm app`: the keyring as a setting, `off` by default or `host` (encrypted, unlocked from the host), tested with Claude Desktop
+- [ ] `pvm app`: host-to-guest clipboard on macOS and Linux, WSL2, reliable input method text, and candidates that follow the text cursor
 - [ ] `pvm desktop` as a host window like `pvm app`, opening the workspace folder in the VM's file manager
+- [ ] PVM Desktop: the installer test on Windows, keeping the workspace form when its VM is stopped, "Create PVM workspace" in the Explorer menu, a tray icon, and screens for snapshots, port maps and mounts
+- [ ] `pvm exit-agent install|uninstall` as a systemd service
 - [ ] Windows CI: the remaining packages' tests, and an installer smoke test on tags
-- [ ] PVM Desktop: an installer test on Windows, a tray icon, and screens for snapshots, port maps and mounts
 
 Candidates:
 
@@ -52,6 +42,7 @@ Candidates:
 - [ ] An egress probe in `pvm exit test`
 - [ ] A default image
 - [ ] Port maps over `pvm.stream` instead of the gateway VM
+- [ ] Exit lists with failover, keeping the kill-switch fail-closed
 - [ ] Fix the gateway rule drift false positive
 - [ ] WHPX end-to-end tests on a self-hosted runner
 
@@ -167,7 +158,7 @@ pvm app catalog
 pvm app install dev1 claude-code codex claude-desktop
 ```
 
-Clipboard and drops are off until you enable them per VM. With `--clipboard to-guest` or `both`, host content enters the VM only when one of its windows comes to the front or you copy while it is there, and content that password managers mark as excluded is never sent. Text, images and, on Windows hosts, files and folders copy both ways. Text typed with a host input method, such as Chinese with Microsoft Pinyin or emoji from the emoji panel, reaches the app as well. Sound plays on the host's speakers; `--audio both` also lends the VM the host's microphone. See [docs/design/app.md](docs/design/app.md).
+Clipboard and drops are off until you enable them per VM. With `--clipboard to-guest` or `both`, host content enters the VM only when one of its windows comes to the front or you copy while it is there, and content that password managers mark as excluded is never sent. Text, images and, on Windows hosts, files and folders copy both ways. Text typed with a host input method, such as Chinese with Microsoft Pinyin or emoji from the emoji panel, reaches the app as well. Sound plays on the host's speakers; `--audio both` also lends the VM the host's microphone. The renderers of Chromium and Electron apps, such as Claude Desktop, run on 2 vCPUs, which draws faster than all of them in a VM; `--render-cpus N` changes that for apps started afterwards, and `0` lifts the limit. See [docs/design/app.md](docs/design/app.md).
 
 `pvm app catalog` lists the apps pvm can install for you: Claude Code, Codex CLI, Claude Desktop and Firefox, each the vendor's official Linux build. `pvm app install [<vm>] <id>...` runs the app's built-in install script as root inside the VM; downloads happen in the VM and leave through its exit, never through the host. `pvm app ls` also shows the catalog apps each VM has, including ones installed with the image or by hand.
 
