@@ -43,7 +43,7 @@ Rejected:
 - ssh -X to an X server on Windows: weak isolation, text-only clipboard.
 - SPICE, Selkies, KasmVNC, Guacamole and noVNC: whole desktops in a browser tab.
 
-The guest runs Xpra 6.5 from xpra.org's APT repository, pinned to the 6.5 line, with the signing key fingerprint checked. Golden images include it, and `pvm app` installs it on first use in older VMs. The host needs the matching Windows client, 6.5.x. The Windows installers include it in `%LOCALAPPDATA%\pvm\xpra`: the release job downloads a pinned zip from xpra.org (`script/windows/fetch-xpra-client.sh`), checks its SHA256 and its signature by the same key as the APT repository, and ships it with its GPL text, a note on where to get the source, and two Python files of pvm added (see [Input methods](#input-methods)).
+The guest runs Xpra 6.5 from xpra.org's APT repository, pinned to the 6.5 line, with the signing key fingerprint checked. Golden images include it, and `pvm app` installs it on first use in older VMs. The host needs the matching Windows client, 6.5.x. The Windows installers include it in `%LOCALAPPDATA%\pvm\xpra`: the release job downloads a pinned zip from xpra.org (`script/windows/fetch-xpra-client.sh`), checks its SHA256 and its signature by the same key as the APT repository, and ships it with its GPL text, a note on where to get the source, and three Python files of pvm added (see [Input methods](#input-methods) and [Sound](#sound)).
 
 ### Session model
 
@@ -101,6 +101,8 @@ The server runs its own PulseAudio (`xpra-audio-server`) with `--speaker=on --mi
 - `off`: neither.
 
 Both directions use Opus. Measured on a Windows host: a 440 Hz tone played in the VM with `paplay` was recorded from the host's output device through WASAPI loopback at about 440 Hz, and a recording in the VM picked up the host's default microphone. Before `PULSE_SERVER` was set, apps played into the session's null sink and the host heard nothing.
+
+The Windows client follows a change of the default output device, such as plugging in headphones, by restarting the speaker. It did nothing for the input device: the microphone kept recording the device that was the default when forwarding started. After a headset was unplugged, that device was gone and the VM heard nothing until the client was attached again. After one was plugged in, the VM kept hearing the built-in microphone. The Windows installers add `xpra/client/subsystem/audio.py` to the client. While the microphone is on, it watches for device changes with the client's own `IMMNotificationClient` monitor. One second after a change, as one plug sends several notifications, it restarts the microphone if the default input device is another one or its capture has stopped. A change of output device alone does not restart it. Measured: after unplugging a headset and plugging it in again, the client logged a microphone restart one second after each speaker restart, and the VM heard the headset's microphone again.
 
 ## Startup
 
