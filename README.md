@@ -25,12 +25,12 @@ Shipped:
 - [x] PVM Desktop on native Windows, a stored default VM, the app catalog with `pvm app install`; upstream merged (v1.3.0-1.3.1)
 - [x] vCPUs and memory in `pvm resize` and PVM Desktop, stopping the daemon from PVM Desktop, installed apps found in the VM, Firefox in the catalog (v1.3.2-1.3.3)
 - [x] Renderer CPUs for Chromium apps; input method text through ibus, with candidates at the text cursor on Windows; less CPU for sound, silence not sent, and a microphone that follows headsets (v1.3.4)
+- [x] The keyring as a setting, `off` or `host` (encrypted, unlocked from the host); window scale per VM; app settings that apply to open windows at once; no focus ring after clicks in Electron apps (v1.3.5)
 
 Planned:
 
 - [ ] The full name: Proxied Virtual Machine (PVM), to be agreed upstream
 - [ ] WHPX: AVX in VMs, and a QEMU chosen per VM (the bundled or own build, or the system's)
-- [ ] `pvm app`: the keyring as a setting, `off` by default or `host` (encrypted, unlocked from the host), tested with Claude Desktop
 - [ ] `pvm app`: host-to-guest clipboard on macOS and Linux, WSL2, and input method text in programs without ibus
 - [ ] `pvm desktop` as a host window like `pvm app`, opening the workspace folder in the VM's file manager
 - [ ] PVM Desktop: the installer test on Windows, app settings that show every setting without scrolling, keeping the workspace form when its VM is stopped, "Create PVM workspace" in the Explorer menu, a tray icon, and screens for snapshots, port maps and mounts

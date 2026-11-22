@@ -25,12 +25,12 @@
 - [x] 原生 Windows 上的 PVM Desktop、保存的默认虚拟机、应用目录与 `pvm app install`；合并上游（v1.3.0-1.3.1）
 - [x] `pvm resize` 和 PVM Desktop 可调 vCPU 与内存、在 PVM Desktop 里关闭 daemon、在虚拟机内检测已安装的应用、应用目录加入 Firefox（v1.3.2-1.3.3）
 - [x] Chromium 应用的渲染进程 CPU 上限；输入法文字经 ibus 输入，Windows 上候选框跟随文本光标；声音更省 CPU、静音不发送，麦克风随耳机插拔切换（v1.3.4）
+- [x] 密钥环改为设置项，`off` 或 `host`（加密存放、由宿主机解锁）；按虚拟机设置窗口缩放；应用设置对已打开的窗口立即生效；Electron 应用点击后不再出现焦点框（v1.3.5）
 
 计划中：
 
 - [ ] 正式名称：Proxied Virtual Machine (PVM)，待与上游确认
 - [ ] WHPX：虚拟机内可用 AVX，并按虚拟机选择 QEMU（自带或自编译版，或系统里的官方版）
-- [ ] `pvm app`：密钥环改为设置项，默认 `off`，可选 `host`（加密存放、由宿主机解锁），需验证 Claude Desktop 正常使用
 - [ ] `pvm app`：macOS 和 Linux 上宿主机到虚拟机的剪贴板、WSL2，以及不用 ibus 的程序里的输入法输入
 - [ ] `pvm desktop` 像 `pvm app` 一样作为宿主机窗口打开，并在虚拟机文件管理器里打开工作区目录
 - [ ] PVM Desktop：在 Windows 上测试安装包、应用设置不用滚动就能看到全部选项、虚拟机未启动时保留工作区表单、资源管理器右键菜单"创建 PVM 工作区"、托盘图标，以及快照、端口映射和挂载的界面
