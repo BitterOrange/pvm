@@ -33,7 +33,7 @@
 - [ ] `pvm app`：密钥环改为设置项，默认 `off`，可选 `host`（加密存放、由宿主机解锁），需验证 Claude Desktop 正常使用
 - [ ] `pvm app`：macOS 和 Linux 上宿主机到虚拟机的剪贴板、WSL2，以及不用 ibus 的程序里的输入法输入
 - [ ] `pvm desktop` 像 `pvm app` 一样作为宿主机窗口打开，并在虚拟机文件管理器里打开工作区目录
-- [ ] PVM Desktop：在 Windows 上测试安装包、虚拟机未启动时保留工作区表单、资源管理器右键菜单"创建 PVM 工作区"、托盘图标，以及快照、端口映射和挂载的界面
+- [ ] PVM Desktop：在 Windows 上测试安装包、应用设置不用滚动就能看到全部选项、虚拟机未启动时保留工作区表单、资源管理器右键菜单"创建 PVM 工作区"、托盘图标，以及快照、端口映射和挂载的界面
 - [ ] `pvm exit-agent install|uninstall`，注册为 systemd 服务
 - [ ] Windows CI：其余包的测试，以及打 tag 时对安装包做冒烟测试
 
