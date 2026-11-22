@@ -78,6 +78,30 @@ type appState struct {
 	// RenderCPUs is how many vCPUs the renderers of a Chromium app may
 	// use; nil is defaultRenderCPUs and 0 is no limit.
 	RenderCPUs *int `json:"render_cpus,omitempty"`
+	// Scale is how much the host client enlarges the VM's windows, one of
+	// appScales; 0 is 1, no scaling.
+	Scale float64 `json:"scale,omitempty"`
+}
+
+// appScales are the window scales offered. At 1.25 the VM draws its
+// windows at 64% of the pixels, with Xpra lowering the DPI it reports to
+// match, so text keeps its size on the host.
+var appScales = []float64{1, 1.25, 1.5, 2}
+
+func (st *appState) scale() float64 {
+	if st.Scale == 0 {
+		return 1
+	}
+	return st.Scale
+}
+
+// scaleList is appScales for an error message: "1, 1.25, 1.5 or 2".
+func scaleList() string {
+	var s []string
+	for _, v := range appScales {
+		s = append(s, strconv.FormatFloat(v, 'f', -1, 64))
+	}
+	return strings.Join(s[:len(s)-1], ", ") + " or " + s[len(s)-1]
 }
 
 // defaultRenderCPUs: in a 10-vCPU WHPX VM, Claude Desktop scrolled and
@@ -122,9 +146,34 @@ func (st *appState) clipboard() string {
 	return st.Clipboard
 }
 
+// appAttached reports whether a client is connected to the VM's server.
+func (s *Server) appAttached(name string) bool {
+	s.apps.mu.Lock()
+	f := s.apps.fwd[name]
+	s.apps.mu.Unlock()
+	return f != nil && f.active.Load() > 0
+}
+
+// appRescaleScript resizes and moves the VM's windows by ratio, the old
+// scale over the new one, so that a client attached with the new scale
+// shows them at the size and place they had on the host. Maximized and
+// fullscreen windows follow the screen by themselves. Without xprop the
+// state cannot be read, and nothing is moved.
+func appRescaleScript(ratio float64) string {
+	r := strconv.FormatFloat(ratio, 'f', -1, 64)
+	return `export DISPLAY=` + appDisplay + `
+command -v xprop >/dev/null || exit 0
+wmctrl -lG | while read -r id desk x y w h rest; do
+  case $(xprop -id "$id" _NET_WM_STATE 2>/dev/null) in *MAXIMIZED*|*FULLSCREEN*) continue ;; esac
+  set -- $(awk -v r=` + r + ` -v x="$x" -v y="$y" -v w="$w" -v h="$h" 'BEGIN { printf "%d %d %d %d", x * r, y * r, w * r + 0.5, h * r + 0.5 }')
+  xdotool windowsize "$id" "$3" "$4" windowmove "$id" "$1" "$2" || true
+done
+`
+}
+
 // policy is the answer of the app config routes, with the defaults named.
 func (st *appState) policy() map[string]any {
-	return map[string]any{"clipboard": st.clipboard(), "drop": st.Drop, "audio": st.audio(), "audio_silence": st.audioSilence(), "render_cpus": st.renderCPUs()}
+	return map[string]any{"clipboard": st.clipboard(), "drop": st.Drop, "audio": st.audio(), "audio_silence": st.audioSilence(), "render_cpus": st.renderCPUs(), "scale": st.scale()}
 }
 
 // clipToGuest reports whether host clipboard content may enter the VM.
@@ -151,6 +200,8 @@ type appAttach struct {
 	Clipboard    string `json:"clipboard"`
 	Drop         bool   `json:"drop"`
 	Audio        string `json:"audio"`
+	// Scale is the client's --desktop-scaling, 1 for none.
+	Scale float64 `json:"scale"`
 	// Connected is true while a client is attached or one was started in
 	// the last appAttachGrace; the CLI then starts no second client.
 	Connected bool `json:"connected"`
@@ -759,7 +810,7 @@ func (s *Server) attachInfo(spec *vm.Spec, st *appState, f *streamForward, force
 		}
 		s.apps.pending[spec.Name] = time.Now()
 	}
-	return appAttach{Port: f.port(), PasswordFile: pw, Title: "@title@ [" + spec.Name + "]", Clipboard: st.clipboard(), Drop: st.Drop, Audio: st.audio(), Connected: connected}, nil
+	return appAttach{Port: f.port(), PasswordFile: pw, Title: "@title@ [" + spec.Name + "]", Clipboard: st.clipboard(), Drop: st.Drop, Audio: st.audio(), Scale: st.scale(), Connected: connected}, nil
 }
 
 func (s *Server) handleAppStart(w http.ResponseWriter, r *http.Request) {
@@ -1138,16 +1189,18 @@ func (s *Server) handleAppAttach(w http.ResponseWriter, r *http.Request) {
 // one until it is attached again.
 func (s *Server) handleAppConfig(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if _, err := s.getSpec(name); err != nil {
+	spec, err := s.getSpec(name)
+	if err != nil {
 		writeErr(w, 404, err)
 		return
 	}
 	var req struct {
-		Clipboard    string `json:"clipboard"`
-		Drop         *bool  `json:"drop"`
-		Audio        string `json:"audio"`
-		AudioSilence string `json:"audio_silence"`
-		RenderCPUs   *int   `json:"render_cpus"`
+		Clipboard    string   `json:"clipboard"`
+		Drop         *bool    `json:"drop"`
+		Audio        string   `json:"audio"`
+		AudioSilence string   `json:"audio_silence"`
+		RenderCPUs   *int     `json:"render_cpus"`
+		Scale        *float64 `json:"scale"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, fmt.Errorf("bad request: %v", err))
@@ -1161,6 +1214,7 @@ func (s *Server) handleAppConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err)
 		return
 	}
+	oldScale := st.scale()
 	if req.Clipboard != "" {
 		if !slices.Contains(clipboardModes, req.Clipboard) {
 			writeErr(w, 400, fmt.Errorf("--clipboard must be one of %s", strings.Join(clipboardModes, ", ")))
@@ -1205,11 +1259,33 @@ func (s *Server) handleAppConfig(w http.ResponseWriter, r *http.Request) {
 			st.RenderCPUs = nil
 		}
 	}
+	if req.Scale != nil {
+		if !slices.Contains(appScales, *req.Scale) {
+			writeErr(w, 400, fmt.Errorf("--scale must be %s", scaleList()))
+			return
+		}
+		st.Scale = *req.Scale
+		if st.Scale == 1 {
+			st.Scale = 0
+		}
+	}
 	if err := s.saveAppState(name, st); err != nil {
 		writeErr(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, st.policy())
+	out := st.policy()
+	// the CLI attaches a connected client again, which takes the new
+	// settings; before that, the windows are sized for the new scale
+	attached := s.appAttached(name)
+	out["attached"] = attached
+	if attached && st.scale() != oldScale {
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		if msg, err := s.sshRunCtx(ctx, spec, appRescaleScript(oldScale/st.scale())); err != nil {
+			out["rescale_error"] = strings.TrimSpace(err.Error() + " " + msg)
+		}
+	}
+	writeJSON(w, 200, out)
 }
 
 // handleAppConfigGet reports a VM's app policy.

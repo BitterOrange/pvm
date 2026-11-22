@@ -2,7 +2,7 @@ import { backend, errorText, type CatalogApp, type CreateRequest, type Image, ty
 import { banner, button, callout, command, field, focusKey, h, input, mono, redraw, select, type Child } from "./dom";
 import { onLanguage, t } from "./i18n";
 import { icon } from "./icons";
-import { cpuControl, limits, number, outside, renderControl } from "./resources";
+import { cpuControl, limits, number, outside, renderControl, scaleControl } from "./resources";
 import { actStart, data, nav, refresh, toast } from "./store";
 import * as tasks from "./tasks";
 import { appConfigChoices, exitChoices, newAppConfig, programCard, stageBars } from "./vms";
@@ -34,6 +34,8 @@ function fitRender(): void {
   }
 }
 cpus.range.addEventListener("input", fitRender);
+const scale = scaleControl("create:scale");
+scale.load(newAppConfig.scale);
 fitRender();
 const imageNote = h("div", { class: "slot" });
 const exitWarning = h("div", { class: "slot" });
@@ -228,6 +230,7 @@ function request(): CreateRequest {
       audio: audio.value,
       audio_silence: audioSilence.value,
       render_cpus: !renderCpus.touched() || renderCpus.value() === newAppConfig.render_cpus ? "" : renderCpus.value(),
+      scale: scale.value() === newAppConfig.scale ? "" : scale.value(),
     },
     apps: programBoxes.filter((b) => b.checked).map((b) => b.value),
   };
@@ -289,6 +292,7 @@ function label(): void {
         // its choices are sentences, which half a row would cut
         field(t.appConfig.audio, audio),
         field(t.appConfig.audioSilence, audioSilence, t.appConfig.audioSilenceHint),
+        scale.field,
         renderCpus.field,
       ),
       group(c.programs, programs),
@@ -303,6 +307,7 @@ function label(): void {
   }
   cpus.label();
   renderCpus.label();
+  scale.label();
   fillImages();
   const chosen = exit.value;
   exit.replaceChildren(...exitChoices().map((o) => h("option", { value: o.value }, o.label)));

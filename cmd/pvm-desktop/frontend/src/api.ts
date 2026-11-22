@@ -86,6 +86,7 @@ export interface AppConfig {
   audio: string; // off, out or both
   audio_silence: string; // skip or send
   render_cpus: string; // vCPUs for Chromium renderers, 0 no limit
+  scale: string; // 1, 1.25, 1.5 or 2: how much the host enlarges the windows
 }
 
 export interface CreateRequest {

@@ -244,6 +244,9 @@ type AppConfig struct {
 	// RenderCPUs is the vCPUs a Chromium app's renderers may use, as a
 	// number; 0 is no limit.
 	RenderCPUs string `json:"render_cpus"`
+	// Scale is how much the host enlarges the VM's windows: 1, 1.25, 1.5
+	// or 2.
+	Scale string `json:"scale"`
 }
 
 // maxRenderCPUs is the daemon's bound on --render-cpus.
@@ -259,6 +262,7 @@ func (c AppConfig) args() ([]string, error) {
 		{"--drop", c.Drop, []string{"on", "off"}},
 		{"--audio", c.Audio, []string{"off", "out", "both"}},
 		{"--audio-silence", c.AudioSilence, []string{"skip", "send"}},
+		{"--scale", c.Scale, []string{"1", "1.25", "1.5", "2"}},
 	} {
 		if f.value == "" {
 			continue

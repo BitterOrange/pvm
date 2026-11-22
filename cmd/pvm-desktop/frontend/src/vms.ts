@@ -26,7 +26,7 @@ import {
 import { t } from "./i18n";
 import { icon, type IconName } from "./icons";
 import * as prefs from "./prefs";
-import { cpuControl, limits, number, outside, renderControl } from "./resources";
+import { cpuControl, limits, number, outside, renderControl, scaleControl } from "./resources";
 import { act, actStart, busy, data, memory, nav, onlyFollowed } from "./store";
 
 const stateKind = { stopped: "", starting: "info", ready: "ok", failed: "danger" } as const;
@@ -76,8 +76,9 @@ export function exitDialog(name: string, current: string): void {
   });
 }
 
-// The settings chosen from a list; render_cpus is a number.
-type ChoiceSetting = Exclude<keyof AppConfig, "render_cpus">;
+// The settings chosen from a list; render_cpus is a number and scale a
+// slider of its own.
+type ChoiceSetting = Exclude<keyof AppConfig, "render_cpus" | "scale">;
 
 // appConfigChoices are the values `pvm app config` takes.
 export function appConfigChoices(): Record<ChoiceSetting, { value: string; label: string }[]> {
@@ -92,7 +93,7 @@ export function appConfigChoices(): Record<ChoiceSetting, { value: string; label
 
 // What the Create form starts from: the app settings of a VM that
 // `pvm app config` has not been run for.
-export const newAppConfig: AppConfig = { clipboard: "off", drop: "off", audio: "out", audio_silence: "skip", render_cpus: "2" };
+export const newAppConfig: AppConfig = { clipboard: "off", drop: "off", audio: "out", audio_silence: "skip", render_cpus: "2", scale: "1" };
 
 
 // programCard is a catalog program to tick. The name and the description
@@ -242,6 +243,7 @@ function settingsDialog(vm: VM): void {
   // the slider ends at the VM's vCPUs
   const render = renderControl("settings:render");
   render.setMost(vm.cpus);
+  const scale = scaleControl("settings:scale");
   const fields = h("div", { class: "slot" }, loading());
   let now: AppConfig | null = null;
   // an empty field is left as it is: only what differs is sent
@@ -255,6 +257,7 @@ function settingsDialog(vm: VM): void {
     audio: changed("audio"),
     audio_silence: changed("audio_silence"),
     render_cpus: renderChanged(),
+    scale: scale.value() === now?.scale ? "" : scale.value(),
   });
   const d = dialog({
     title: t.vms.settingsTitle(mono(vm.name)),
@@ -280,11 +283,13 @@ function settingsDialog(vm: VM): void {
         controls.audio.value = config.audio;
         controls.audio_silence.value = config.audio_silence;
         render.load(config.render_cpus);
+        scale.load(config.scale);
         fields.replaceChildren(
           field(t.appConfig.clipboard, controls.clipboard),
           field(t.appConfig.drop, controls.drop, ...t.vms.dropHint(mono("~/Downloads"))),
           field(t.appConfig.audio, controls.audio),
           field(t.appConfig.audioSilence, controls.audio_silence, t.appConfig.audioSilenceHint),
+          scale.field,
           render.field,
         );
         controls.clipboard.focus();

@@ -49,7 +49,7 @@ export const en = {
     audioSilence: "Silence",
     silenceSkip: "Not sent, which saves CPU",
     silenceSend: "Sent like any sound",
-    audioSilenceHint: "While the VM plays nothing, no sound goes to the host and the VM stays idle. Applies the next time the windows are attached.",
+    audioSilenceHint: "While the VM plays nothing, no sound goes to the host and the VM stays idle. Open windows are attached again to apply it.",
     renderCpus: "Renderer CPUs",
     renderCpusHint:
       "Limits only the renderers of Chromium and Electron programs, such as Claude Desktop; their other work still uses every vCPU. The end of the slider, or 0, is no limit. Applies to programs started afterwards.",
@@ -57,6 +57,11 @@ export const en = {
     renderCpusNumber: "Renderer CPUs, as a number",
     renderCpusAll: "No limit",
     renderCpusOf: (n: number, most: number) => n + " of " + most + " vCPUs",
+    scale: "Window scale",
+    scaleHint:
+      "The VM draws its windows at fewer pixels and the host enlarges them: at 1.5 it draws less than half as many. Programs such as Claude Desktop then draw faster, and text keeps its size but looks softer. Open windows are attached again to apply it and keep their size on the host.",
+    scaleOf: (scale: string) => scale + "×",
+    scaleNone: "No scaling",
   },
 
   // The numbers of a VM, in the Create form and in Resize.

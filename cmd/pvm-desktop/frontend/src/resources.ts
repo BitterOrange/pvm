@@ -193,3 +193,76 @@ export function renderControl(key: string): RenderControl {
     label,
   };
 }
+
+// The window scales `pvm app config --scale` takes, one stop each.
+export const scales = ["1", "1.25", "1.5", "2"];
+
+export interface ScaleControl {
+  // field is the labelled slider with its hint.
+  field: HTMLElement;
+  // value is the scale as --scale takes it.
+  value(): string;
+  // load shows a setting read from the daemon or the default.
+  load(value: string): void;
+  label(): void;
+}
+
+// scaleControl is the window scale: a slider that stops at each scale,
+// named under the track, where the one chosen is lit.
+export function scaleControl(key: string): ScaleControl {
+  const id = "scale-" + ++controls;
+  const last = scales.length - 1;
+  const range = h("input", { type: "range", class: "slider-range", min: 0, max: last, step: 1, id, "data-key": key, "aria-describedby": id + "-hint" });
+  const now = h("strong");
+  const stops = scales.map((_, i) => {
+    const stop = h("span", {
+      // a mouse can pick a stop by its name too
+      onclick: () => {
+        range.value = String(i);
+        range.dispatchEvent(new Event("input", { bubbles: true }));
+        range.focus();
+      },
+    });
+    stop.style.setProperty("--p", String(i / last));
+    return stop;
+  });
+  const steps = h("div", { class: "slider-steps", "aria-hidden": "true" }, ...stops);
+  const name = h("label", { class: "label", for: id });
+  const hint = h("p", { class: "hint", id: id + "-hint" });
+  const value = () => scales[Number(range.value)];
+
+  function draw(): void {
+    range.style.setProperty("--at", String(Number(range.value) / last));
+    now.textContent = t.appConfig.scaleOf(value());
+    stops.forEach((s, i) => {
+      s.textContent = t.appConfig.scaleOf(scales[i]);
+      s.toggleAttribute("data-on", i === Number(range.value));
+    });
+    range.setAttribute("aria-valuetext", value() === "1" ? t.appConfig.scaleNone : t.appConfig.scaleOf(value()));
+  }
+
+  function label(): void {
+    name.textContent = t.appConfig.scale;
+    hint.textContent = t.appConfig.scaleHint;
+    draw();
+  }
+
+  range.addEventListener("input", draw);
+  label();
+  return {
+    field: h(
+      "div",
+      { class: "field" },
+      name,
+      h("div", { class: "slider slider--typed" }, range, h("span", { class: "slider-value slider-value--steps", "aria-hidden": "true" }, now), steps),
+      hint,
+    ),
+    value,
+    load(v) {
+      // a scale this version does not know shows as none
+      range.value = String(Math.max(0, scales.indexOf(v)));
+      draw();
+    },
+    label,
+  };
+}

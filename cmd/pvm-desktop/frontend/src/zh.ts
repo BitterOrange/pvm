@@ -44,7 +44,7 @@ export const zh: Messages = {
     audioSilence: "静音",
     silenceSkip: "不发送，节省 CPU",
     silenceSend: "和其他声音一样发送",
-    audioSilenceHint: "虚拟机没有播放声音时，不向宿主机发送任何音频，虚拟机保持空闲。下次连接窗口时生效。",
+    audioSilenceHint: "虚拟机没有播放声音时，不向宿主机发送任何音频，虚拟机保持空闲。已打开的窗口会重新连接，立即生效。",
     renderCpus: "渲染进程 CPU 数",
     renderCpusHint:
       "只限制 Chromium 和 Electron 程序（比如 Claude Desktop）的渲染进程，程序的其他工作仍可用全部 vCPU。滑到最右或填 0 表示不限制。对之后启动的程序生效。",
@@ -52,6 +52,11 @@ export const zh: Messages = {
     renderCpusNumber: "渲染进程 CPU 数，输入数字",
     renderCpusAll: "不限制",
     renderCpusOf: (n, most) => n + " / " + most + " 个 vCPU",
+    scale: "窗口缩放",
+    scaleHint:
+      "虚拟机用更少的像素绘制窗口，再由宿主机放大显示：1.5 倍时要画的像素不到原来的一半。Claude Desktop 等程序会因此画得更快，文字大小不变，但会略显模糊。已打开的窗口会重新连接，立即生效，并在宿主机上保持原来的大小。",
+    scaleOf: (scale) => scale + "×",
+    scaleNone: "不缩放",
   },
 
   resources: {

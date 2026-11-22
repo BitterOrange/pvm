@@ -94,6 +94,28 @@ Characters outside the Basic Multilingual Plane, such as emoji from the Windows 
 
 Firefox's maximize button could not be clicked on Windows hosts. GTK gives Firefox's window a maximum size of 16366x16337. The Xpra Windows client removes the maximize button of any window whose maximum size is below 32767. `xpra_start.py` wraps Xpra's `sanitize_size_hints`, before the window model imports it, so that a maximum size larger than any screen, at least 8192 on both sides, is dropped before the server passes the window's size hints on.
 
+## Window scale
+
+`pvm app config <vm> --scale 1|1.25|1.5|2`, 1 by default, becomes the client's `--desktop-scaling`. The server's screen and windows shrink by the scale and the client enlarges them, so the VM draws fewer pixels: 64% of them at 1.25, 44% at 1.5 and 25% at 2. Xpra also lowers the DPI it gives the VM by the same factor, from 120 to 96 at 1.25 on a host at 125%. Claude Desktop then drew at 1x without a restart, so its text kept its size on the host and only looked softer. Xpra's own default, `on`, scales nothing, so pvm passes the option only above 1.
+
+The scale is the client's, so a running client keeps the one it started with. A window that is already open keeps its size in the VM, so on the host it would change size by the same factor: at 1.25 a window 1781 pixels wide became 2226, and one that no longer fitted the screen's height was shrunk by the client to some size of its own. So when the scale changes while a client is connected, the daemon first resizes and moves every window that is neither maximized nor fullscreen by the old scale over the new one, with `wmctrl -lG`, `xprop` and `xdotool`, and the CLI then attaches the client again. Measured from 1.25 to 1.5: Claude Desktop went from 1354x788 to 1128x657 in the VM, and stayed 1711x1032 on the host.
+
+`pvm app config` attaches a connected client again after any change to the client's settings, the clipboard, drops, audio, silence or scale, so they apply at once. `pvm app attach` with a client connected starts a new one; the server takes the new client and the old one exits, its clipboard bridge with it. The windows disappear and come back once.
+
+Measured with Claude Desktop in a 10-vCPU WHPX VM on a host at 125%, with the host window 1761x1048 each time, so that Claude laid out the same page at every scale. A script scrolled a long conversation up and down, 25 wheel steps a second for 8.5 seconds; the frames are the window's damage events from the server's `xpra info`, read from the host. Three runs each:
+
+| Scale | Window in the VM | DPI | Frames a second | Claude and Xpra, in cores | Xpra server | QEMU |
+|---|---|---|---|---|---|---|
+| 1 | 1761x1048 | 120 | 15 to 17 | 2.3 | 0.9 | 3.2 to 3.4 |
+| 1.25 | 1409x838 | 96 | about 28 | 1.8 to 2.1 | 0.8 to 0.9 | 3.0 to 3.4 |
+| 1.5 | 1174x699 | 80 | 22 to 24 | 1.9 to 2.0 | 0.7 | 3.0 to 3.1 |
+| 2 | 880x524 | 60 | 26 to 29 | 2.2 to 2.4 | 1.1 | 3.1 to 3.4 |
+
+- Scrolling saturates the VM, so fewer pixels show as more frames rather than less CPU. 1.25 drew about 1.7 times as many frames as 1 with a little less CPU.
+- 1.5 and 2 drew no more than 1.25. Unconfirmed: once a frame has fewer pixels, the per-frame work, Claude's script and layout and Xpra's handling of each update, sets the pace; and below a device scale of 1, as at 0.8 and 0.625 here, Chromium may draw less efficiently. On a host at 125%, 1.25 is the scale at which Chromium draws at exactly 1x.
+- With nothing changing, every scale was idle: about 0.2 cores and no frames.
+- A first run with an artifact preview open in Claude saw no gain at any scale. Its pulsing status dots changed a small area about 50 times a second, which cost 2 cores in the VM whatever the scale: the cost of such updates is per frame, not per pixel.
+
 ## Sound
 
 The server runs its own PulseAudio (`xpra-audio-server`) with `--speaker=on --microphone=on`. The guest session runs a PulseAudio of its own, with only a null sink, which apps would otherwise use; the server script puts `PULSE_SERVER` for the server's in the user manager's environment, which app units inherit, and starts the server without it, as its PulseAudio refuses to start while one is named. The client decides, from `pvm app config <vm> --audio`:
@@ -115,7 +137,7 @@ Three changes followed. The measurements were taken on one server, attaching the
   - GStreamer's `cutter` passes nothing after half a second below -70 dB, which only digital silence reaches, and when a sound starts it passes the 0.1 s before it too.
   - It does not pass on the formats the encoder takes, so the source picked 44.1 kHz, which Opus refuses, and the capture stopped. A caps filter before it fixes 48 kHz.
   - Xpra's own handling of cutter's messages is turned off: they reach it late, and it would cut the start of a sound.
-  - pvm writes the setting to `$XDG_RUNTIME_DIR/pvm/audio-silence` whenever a client attaches, and the audio processes read it when they start. So it applies to clients attached afterwards.
+  - pvm writes the setting to `$XDG_RUNTIME_DIR/pvm/audio-silence` whenever a client attaches, and the audio processes read it when they start. So it applies once the client is attached again, which `pvm app config` does.
 - **Results, in function-call IPIs a second and QEMU's share of one host core:**
   - 20 ms frames: 1,500 to 1,900 IPIs, 85% to 135%.
   - 60 ms frames: about 1,280 IPIs, 63% to 94%.

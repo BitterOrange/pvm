@@ -29,7 +29,7 @@ const appUsage = `[<vm>] <url> [--name ID] [--kiosk] [--no-attach] [--yes]
        pvm app install [<vm>] <id>... [--yes]
        pvm app stop [<vm>] [<id> | --all]
        pvm app attach [<vm>] [--yes]
-       pvm app config [<vm>] [--clipboard off|to-guest|to-host|both] [--drop on|off] [--audio off|out|both] [--audio-silence skip|send] [--render-cpus N]`
+       pvm app config [<vm>] [--clipboard off|to-guest|to-host|both] [--drop on|off] [--audio off|out|both] [--audio-silence skip|send] [--render-cpus N] [--scale 1|1.25|1.5|2]`
 
 type appView struct {
 	VM    string   `json:"vm"`
@@ -42,13 +42,14 @@ type appView struct {
 }
 
 type appAttach struct {
-	Port         int    `json:"port"`
-	PasswordFile string `json:"password_file"`
-	Title        string `json:"title"`
-	Clipboard    string `json:"clipboard"`
-	Drop         bool   `json:"drop"`
-	Audio        string `json:"audio"`
-	Connected    bool   `json:"connected"`
+	Port         int     `json:"port"`
+	PasswordFile string  `json:"password_file"`
+	Title        string  `json:"title"`
+	Clipboard    string  `json:"clipboard"`
+	Drop         bool    `json:"drop"`
+	Audio        string  `json:"audio"`
+	Scale        float64 `json:"scale"`
+	Connected    bool    `json:"connected"`
 }
 
 func CmdApp(args []string) int {
@@ -200,13 +201,14 @@ func CmdApp(args []string) int {
 		fmt.Printf("xpra client started for %s\n", vmName)
 		return 0
 	case "config":
-		const usage = "[<vm>] [--clipboard off|to-guest|to-host|both] [--drop on|off] [--audio off|out|both] [--audio-silence skip|send] [--render-cpus N]"
+		const usage = "[<vm>] [--clipboard off|to-guest|to-host|both] [--drop on|off] [--audio off|out|both] [--audio-silence skip|send] [--render-cpus N] [--scale 1|1.25|1.5|2]"
 		fs := newFlagSet("app config", usage)
 		clip := fs.String("clipboard", "", "off, to-guest (host to vm), to-host (vm to host) or both")
 		drop := fs.String("drop", "", "on: files dropped on the vm's windows upload into ~/Downloads in the vm")
 		audio := fs.String("audio", "", "out (vm sound on the host speakers), both (also the host microphone into the vm) or off")
 		silence := fs.String("audio-silence", "", "skip (default: no sound is sent while the vm plays none, which saves cpu) or send")
 		renderCPUs := fs.Int("render-cpus", -1, "vCPUs the renderers of Chromium and Electron apps may use (default 2; 0: no limit)")
+		scale := fs.String("scale", "", "how much the host enlarges the vm's windows: 1 (default), 1.25, 1.5 or 2; the vm draws them at fewer pixels, which is faster and softer")
 		if err := fs.Parse(flagsFirst(fs, args[1:])); err != nil {
 			return 2
 		}
@@ -231,6 +233,13 @@ func CmdApp(args []string) int {
 		} else if *renderCPUs != -1 {
 			return fatalf("--render-cpus must be 0 (no limit) or more")
 		}
+		if *scale != "" {
+			v, err := strconv.ParseFloat(*scale, 64)
+			if err != nil {
+				return fatalf("--scale must be 1, 1.25, 1.5 or 2")
+			}
+			body["scale"] = v
+		}
 		c, err := ensureDaemon(p)
 		if err != nil {
 			return fatalf("%v", err)
@@ -240,11 +249,16 @@ func CmdApp(args []string) int {
 			return fatalf("%v", err)
 		}
 		var out struct {
-			Clipboard    string `json:"clipboard"`
-			Drop         bool   `json:"drop"`
-			Audio        string `json:"audio"`
-			AudioSilence string `json:"audio_silence"`
-			RenderCPUs   int    `json:"render_cpus"`
+			Clipboard    string  `json:"clipboard"`
+			Drop         bool    `json:"drop"`
+			Audio        string  `json:"audio"`
+			AudioSilence string  `json:"audio_silence"`
+			RenderCPUs   int     `json:"render_cpus"`
+			Scale        float64 `json:"scale"`
+			// Attached is a client connected to the vm; RescaleError says
+			// why its windows were not sized for a new scale.
+			Attached     bool   `json:"attached"`
+			RescaleError string `json:"rescale_error"`
 		}
 		if err := c.Put("/v1/vms/"+vmName+"/apps/config", body, &out); err != nil {
 			return fatalf("%v", err)
@@ -257,7 +271,7 @@ func CmdApp(args []string) int {
 		if out.RenderCPUs > 0 {
 			renderS = strconv.Itoa(out.RenderCPUs)
 		}
-		fmt.Printf("%s: clipboard %s, drop %s, audio %s, audio silence %s, render cpus %s\n", vmName, out.Clipboard, dropS, out.Audio, out.AudioSilence, renderS)
+		fmt.Printf("%s: clipboard %s, drop %s, audio %s, audio silence %s, render cpus %s, scale %s\n", vmName, out.Clipboard, dropS, out.Audio, out.AudioSilence, renderS, strconv.FormatFloat(out.Scale, 'f', -1, 64))
 		if out.Clipboard == "to-guest" || out.Clipboard == "both" {
 			fmt.Println("host clipboard content enters the vm when one of its windows comes to the front, and when you copy while it is there")
 		}
@@ -271,9 +285,25 @@ func CmdApp(args []string) int {
 			fmt.Println("render cpus apply to apps started from now on")
 			delete(body, "render_cpus")
 		}
-		if len(body) > 0 {
-			fmt.Printf("it applies to clients attached from now on: pvm app attach %s\n", vmName)
+		if len(body) == 0 {
+			return 0
 		}
+		// the rest is the client's: a connected one is attached again
+		if !out.Attached {
+			fmt.Printf("it applies the next time its windows are attached: pvm app attach %s\n", vmName)
+			return 0
+		}
+		if out.RescaleError != "" {
+			fmt.Fprintf(os.Stderr, "its windows were not resized for the new scale: %s\n", out.RescaleError)
+		}
+		var att appAttach
+		if err := c.Post("/v1/vms/"+vmName+"/apps/attach?force=1", nil, &att); err != nil {
+			return fatalf("the setting is saved, but attaching the windows again failed: %v; run pvm app attach %s", err, vmName)
+		}
+		if err := startXpraClient(vmName, att); err != nil {
+			return fatalf("the setting is saved, but attaching the windows again failed: %v; run pvm app attach %s", err, vmName)
+		}
+		fmt.Printf("attached the windows of %s again, so it applies now\n", vmName)
 		return 0
 	case "__clipboard":
 		return cmdAppClipboardBridge(p, args[1:])
@@ -537,6 +567,11 @@ func startXpraClientAt(vm, client string, att appAttach) error {
 		args = append(args, "--speaker=on", "--microphone=no")
 	default:
 		args = append(args, "--speaker=no", "--microphone=no")
+	}
+	// the server's windows and DPI shrink by the scale and the client
+	// enlarges them again; Xpra's own default is no scaling
+	if att.Scale > 1 {
+		args = append(args, "--desktop-scaling="+strconv.FormatFloat(att.Scale, 'f', -1, 64))
 	}
 	if runtime.GOOS == "windows" {
 		// OpenGL painting on Windows slows the client's frame acks, and the

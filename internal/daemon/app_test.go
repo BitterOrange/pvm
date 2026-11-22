@@ -85,6 +85,7 @@ func TestAppScriptsParse(t *testing.T) {
 		"pin":     appLaunchScript(&appRecord{ID: "claude", Kind: "cmd", Argv: []string{"claude-desktop"}}, "", "", 2),
 		"url":     appLaunchScript(&appRecord{ID: "mail", Kind: "url", URL: "https://example.com/?a=1&b='2'", Kiosk: true}, "", "", 0),
 		"stop":    appStopScript([]appRecord{{ID: "gedit"}, {ID: "mail", Kind: "url", Window: "0x00c00003"}}, false),
+		"rescale": appRescaleScript(1.25 / 1.5),
 	}
 	for name, s := range scripts {
 		if out, err := exec.Command(sh, "-n", "-c", s).CombinedOutput(); err != nil {
@@ -328,24 +329,29 @@ func TestAppConfigRoutes(t *testing.T) {
 		}
 		return strings.TrimSpace(rr.Body.String())
 	}
-	if got, want := call("GET", ""), `{"audio":"out","audio_silence":"skip","clipboard":"off","drop":false,"render_cpus":2}`; got != want {
+	if got, want := call("GET", ""), `{"audio":"out","audio_silence":"skip","clipboard":"off","drop":false,"render_cpus":2,"scale":1}`; got != want {
 		t.Errorf("a vm without app state: %s, want %s", got, want)
 	}
-	set := call("PUT", `{"clipboard":"both","drop":true,"audio":"off","audio_silence":"send","render_cpus":0}`)
-	if got := call("GET", ""); got != set || got != `{"audio":"off","audio_silence":"send","clipboard":"both","drop":true,"render_cpus":0}` {
+	// PUT also says whether a client is attached, to attach it again; with
+	// none, a new scale moves no window
+	set := call("PUT", `{"clipboard":"both","drop":true,"audio":"off","audio_silence":"send","render_cpus":0,"scale":1.25}`)
+	if got := call("GET", ""); set != `{"attached":false,"audio":"off","audio_silence":"send","clipboard":"both","drop":true,"render_cpus":0,"scale":1.25}` || got != `{"audio":"off","audio_silence":"send","clipboard":"both","drop":true,"render_cpus":0,"scale":1.25}` {
 		t.Errorf("after the change: GET %s, PUT answered %s", got, set)
 	}
-	if got := call("PUT", `{"render_cpus":4}`); got != `{"audio":"off","audio_silence":"send","clipboard":"both","drop":true,"render_cpus":4}` {
+	if got := call("PUT", `{"render_cpus":4}`); got != `{"attached":false,"audio":"off","audio_silence":"send","clipboard":"both","drop":true,"render_cpus":4,"scale":1.25}` {
 		t.Errorf("render cpus 4: %s", got)
 	}
-	// the default is not stored
-	if got := call("PUT", `{"audio_silence":"skip"}`); !strings.Contains(got, `"audio_silence":"skip"`) {
-		t.Errorf("audio silence skip: %s", got)
+	// the defaults are not stored
+	if got := call("PUT", `{"audio_silence":"skip","scale":1}`); !strings.Contains(got, `"audio_silence":"skip"`) || !strings.Contains(got, `"scale":1}`) {
+		t.Errorf("audio silence skip, scale 1: %s", got)
 	}
-	if st, err := s.loadAppState("dev1"); err != nil || st.AudioSilence != "" {
-		t.Errorf("stored audio silence %q, %v; want the default left out", st.AudioSilence, err)
+	if st, err := s.loadAppState("dev1"); err != nil || st.AudioSilence != "" || st.Scale != 0 {
+		t.Errorf("stored audio silence %q, scale %v, %v; want the defaults left out", st.AudioSilence, st.Scale, err)
 	}
-	for body, flag := range map[string]string{`{"render_cpus":-1}`: "--render-cpus", `{"render_cpus":257}`: "--render-cpus", `{"audio_silence":"loud"}`: "--audio-silence"} {
+	if got := call("PUT", `{"scale":2}`); !strings.Contains(got, `"scale":2}`) {
+		t.Errorf("scale 2: %s", got)
+	}
+	for body, flag := range map[string]string{`{"render_cpus":-1}`: "--render-cpus", `{"render_cpus":257}`: "--render-cpus", `{"audio_silence":"loud"}`: "--audio-silence", `{"scale":1.75}`: "--scale must be 1, 1.25, 1.5 or 2", `{"scale":0}`: "--scale", `{"scale":"2"}`: "bad request"} {
 		rr := httptest.NewRecorder()
 		s.handler().ServeHTTP(rr, httptest.NewRequest("PUT", "/v1/vms/dev1/apps/config", strings.NewReader(body)))
 		if rr.Code != 400 || !strings.Contains(rr.Body.String(), flag) {
