@@ -24,6 +24,7 @@
 - [x] 默认使用当前工作区的虚拟机；`pvm app` 支持宿主机窗口边框、声音、剪贴板文件、emoji 和各主要文字的字体；CI 跑 Windows 单元测试（v1.2.1-1.2.2）
 - [x] 原生 Windows 上的 PVM Desktop、保存的默认虚拟机、应用目录与 `pvm app install`；合并上游（v1.3.0-1.3.1）
 - [x] `pvm resize` 和 PVM Desktop 可调 vCPU 与内存、在 PVM Desktop 里关闭 daemon、在虚拟机内检测已安装的应用、应用目录加入 Firefox（v1.3.2-1.3.3）
+- [x] Chromium 应用的渲染进程 CPU 上限；输入法文字经 ibus 输入，Windows 上候选框跟随文本光标；声音更省 CPU、静音不发送，麦克风随耳机插拔切换（v1.3.4）
 
 计划中：
 

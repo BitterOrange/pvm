@@ -24,6 +24,7 @@ Shipped:
 - [x] The current workspace's VM by default; `pvm app` with host window frames, sound, file clipboard, emoji and fonts for all scripts; Windows unit tests in CI (v1.2.1-1.2.2)
 - [x] PVM Desktop on native Windows, a stored default VM, the app catalog with `pvm app install`; upstream merged (v1.3.0-1.3.1)
 - [x] vCPUs and memory in `pvm resize` and PVM Desktop, stopping the daemon from PVM Desktop, installed apps found in the VM, Firefox in the catalog (v1.3.2-1.3.3)
+- [x] Renderer CPUs for Chromium apps; input method text through ibus, with candidates at the text cursor on Windows; less CPU for sound, silence not sent, and a microphone that follows headsets (v1.3.4)
 
 Planned:
 
