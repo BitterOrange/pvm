@@ -9,6 +9,7 @@ Package: *
 Pin: origin packages.mozilla.org
 Pin-Priority: 1000
 PIN
-  $apt install -y firefox
+  # a VM that has Ubuntu's 1:1snap1 package sees Mozilla's as older
+  $apt install -y --allow-downgrades firefox
 fi
 firefox --version
