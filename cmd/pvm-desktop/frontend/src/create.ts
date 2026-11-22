@@ -24,6 +24,7 @@ const clipboard = select([], "");
 const drop = select([], "");
 const audio = select([], "");
 const audioSilence = select([], "");
+const keyring = select([], "");
 // the renderer slider ends at the vCPUs chosen above; untouched it keeps
 // pvm's default
 const renderCpus = renderControl("create:render");
@@ -229,6 +230,7 @@ function request(): CreateRequest {
       drop: drop.value,
       audio: audio.value,
       audio_silence: audioSilence.value,
+      keyring: keyring.value,
       render_cpus: !renderCpus.touched() || renderCpus.value() === newAppConfig.render_cpus ? "" : renderCpus.value(),
       scale: scale.value() === newAppConfig.scale ? "" : scale.value(),
     },
@@ -294,12 +296,13 @@ function label(): void {
         field(t.appConfig.audioSilence, audioSilence, t.appConfig.audioSilenceHint),
         scale.field,
         renderCpus.field,
+        field(t.appConfig.keyring, keyring, t.appConfig.keyringHint),
       ),
       group(c.programs, programs),
     ),
   );
   const config = appConfigChoices();
-  for (const [el, name] of [[clipboard, "clipboard"], [drop, "drop"], [audio, "audio"], [audioSilence, "audio_silence"]] as const) {
+  for (const [el, name] of [[clipboard, "clipboard"], [drop, "drop"], [audio, "audio"], [audioSilence, "audio_silence"], [keyring, "keyring"]] as const) {
     // the first layout starts from what a new VM has
     const value = el.options.length === 0 ? newAppConfig[name] : el.value;
     el.replaceChildren(...config[name].map((o) => h("option", { value: o.value }, o.label)));

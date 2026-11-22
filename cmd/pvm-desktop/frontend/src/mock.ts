@@ -45,7 +45,7 @@ interface Machine {
 }
 
 // The app settings of each VM; one without an entry has pvm's defaults.
-const appSettings: Record<string, AppConfig> = { apptest: { clipboard: "both", drop: "off", audio: "out", audio_silence: "skip", render_cpus: "2", scale: "1" } };
+const appSettings: Record<string, AppConfig> = { apptest: { clipboard: "both", drop: "off", audio: "out", audio_silence: "skip", render_cpus: "2", scale: "1", keyring: "host" } };
 
 const brokenHint = "provisioning stopped: the vm could not reach its exit my-warp; test the exit, then start broken again";
 
@@ -206,13 +206,13 @@ function startStep(name: string, pace = 1300): Step {
 }
 
 function configFlags(c: AppConfig): string[] {
-  return [c.clipboard && "--clipboard " + c.clipboard, c.drop && "--drop " + c.drop, c.audio && "--audio " + c.audio, c.audio_silence && "--audio-silence " + c.audio_silence, c.render_cpus && "--render-cpus " + c.render_cpus, c.scale && "--scale " + c.scale].filter((f): f is string => f !== "");
+  return [c.clipboard && "--clipboard " + c.clipboard, c.drop && "--drop " + c.drop, c.audio && "--audio " + c.audio, c.audio_silence && "--audio-silence " + c.audio_silence, c.render_cpus && "--render-cpus " + c.render_cpus, c.scale && "--scale " + c.scale, c.keyring && "--keyring " + c.keyring].filter((f): f is string => f !== "");
 }
 
 const configure = (name: string, c: AppConfig): Step =>
   said("pvm app config " + name + " " + configFlags(c).join(" "), ["app settings saved"], () => {
-    const now = (appSettings[name] ??= { clipboard: "off", drop: "off", audio: "out", audio_silence: "skip", render_cpus: "2", scale: "1" });
-    appSettings[name] = { clipboard: c.clipboard || now.clipboard, drop: c.drop || now.drop, audio: c.audio || now.audio, audio_silence: c.audio_silence || now.audio_silence, render_cpus: c.render_cpus || now.render_cpus, scale: c.scale || now.scale };
+    const now = (appSettings[name] ??= { clipboard: "off", drop: "off", audio: "out", audio_silence: "skip", render_cpus: "2", scale: "1", keyring: "off" });
+    appSettings[name] = { clipboard: c.clipboard || now.clipboard, drop: c.drop || now.drop, audio: c.audio || now.audio, audio_silence: c.audio_silence || now.audio_silence, render_cpus: c.render_cpus || now.render_cpus, scale: c.scale || now.scale, keyring: c.keyring || now.keyring };
   });
 
 // resizeSteps passes `pvm resize` only what differs, around a stop and a
@@ -288,7 +288,7 @@ const backend: Backend = {
   AppSettings: async (vm) => {
     await sleep(250);
     machine(vm);
-    return { ...(appSettings[vm] ?? { clipboard: "off", drop: "off", audio: "out", audio_silence: "skip", render_cpus: "2", scale: "1" }) };
+    return { ...(appSettings[vm] ?? { clipboard: "off", drop: "off", audio: "out", audio_silence: "skip", render_cpus: "2", scale: "1", keyring: "off" }) };
   },
   Catalog: async () => catalog,
   Exits: async () =>

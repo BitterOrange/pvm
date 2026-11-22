@@ -57,6 +57,11 @@ export const zh: Messages = {
       "虚拟机用更少的像素绘制窗口，再由宿主机放大显示：1.5 倍时要画的像素不到原来的一半。Claude Desktop 等程序会因此画得更快，文字大小不变，但会略显模糊。已打开的窗口会重新连接，立即生效，并在宿主机上保持原来的大小。",
     scaleOf: (scale) => scale + "×",
     scaleNone: "不缩放",
+    keyring: "密钥环",
+    keyringOff: "交给虚拟机",
+    keyringHost: "密码保存在本机",
+    keyringHint:
+      "密码保存在本机时，虚拟机里的 login 密钥环会被加密，pvm 在应用启动前解锁它，Claude Desktop 等应用因此保持登录。交给虚拟机时，pvm 不碰密钥环，应用可能会询问它的密码。从“密码保存在本机”切换走之后，虚拟机重启时这些应用需要重新登录。",
   },
 
   resources: {

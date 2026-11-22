@@ -234,11 +234,12 @@ func (a *App) AppSettings(vm string) (AppConfig, error) {
 		AudioSilence string  `json:"audio_silence"`
 		RenderCPUs   int     `json:"render_cpus"`
 		Scale        float64 `json:"scale"`
+		Keyring      string  `json:"keyring"`
 	}
 	if err := a.daemon.Get("/v1/vms/"+url.PathEscape(vm)+"/apps/config", &resp); err != nil {
 		return AppConfig{}, err
 	}
-	c := AppConfig{Clipboard: resp.Clipboard, Drop: "off", Audio: resp.Audio, AudioSilence: resp.AudioSilence, RenderCPUs: strconv.Itoa(resp.RenderCPUs), Scale: strconv.FormatFloat(resp.Scale, 'f', -1, 64)}
+	c := AppConfig{Clipboard: resp.Clipboard, Drop: "off", Audio: resp.Audio, AudioSilence: resp.AudioSilence, RenderCPUs: strconv.Itoa(resp.RenderCPUs), Scale: strconv.FormatFloat(resp.Scale, 'f', -1, 64), Keyring: resp.Keyring}
 	if resp.Drop {
 		c.Drop = "on"
 	}

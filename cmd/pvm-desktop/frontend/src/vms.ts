@@ -88,12 +88,13 @@ export function appConfigChoices(): Record<ChoiceSetting, { value: string; label
     drop: [{ value: "off", label: c.off }, { value: "on", label: c.on }],
     audio: [{ value: "out", label: c.audioOut }, { value: "both", label: c.audioBoth }, { value: "off", label: c.off }],
     audio_silence: [{ value: "skip", label: c.silenceSkip }, { value: "send", label: c.silenceSend }],
+    keyring: [{ value: "off", label: c.keyringOff }, { value: "host", label: c.keyringHost }],
   };
 }
 
 // What the Create form starts from: the app settings of a VM that
 // `pvm app config` has not been run for.
-export const newAppConfig: AppConfig = { clipboard: "off", drop: "off", audio: "out", audio_silence: "skip", render_cpus: "2", scale: "1" };
+export const newAppConfig: AppConfig = { clipboard: "off", drop: "off", audio: "out", audio_silence: "skip", render_cpus: "2", scale: "1", keyring: "off" };
 
 
 // programCard is a catalog program to tick. The name and the description
@@ -239,6 +240,7 @@ function settingsDialog(vm: VM): void {
     drop: select(choices.drop, newAppConfig.drop),
     audio: select(choices.audio, newAppConfig.audio),
     audio_silence: select(choices.audio_silence, newAppConfig.audio_silence),
+    keyring: select(choices.keyring, newAppConfig.keyring),
   };
   // the slider ends at the VM's vCPUs
   const render = renderControl("settings:render");
@@ -256,6 +258,7 @@ function settingsDialog(vm: VM): void {
     drop: changed("drop"),
     audio: changed("audio"),
     audio_silence: changed("audio_silence"),
+    keyring: changed("keyring"),
     render_cpus: renderChanged(),
     scale: scale.value() === now?.scale ? "" : scale.value(),
   });
@@ -282,6 +285,7 @@ function settingsDialog(vm: VM): void {
         controls.drop.value = config.drop;
         controls.audio.value = config.audio;
         controls.audio_silence.value = config.audio_silence;
+        controls.keyring.value = config.keyring;
         render.load(config.render_cpus);
         scale.load(config.scale);
         fields.replaceChildren(
@@ -291,6 +295,7 @@ function settingsDialog(vm: VM): void {
           field(t.appConfig.audioSilence, controls.audio_silence, t.appConfig.audioSilenceHint),
           scale.field,
           render.field,
+          field(t.appConfig.keyring, controls.keyring, t.appConfig.keyringHint),
         );
         controls.clipboard.focus();
       },

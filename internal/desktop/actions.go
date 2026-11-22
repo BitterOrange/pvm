@@ -247,6 +247,9 @@ type AppConfig struct {
 	// Scale is how much the host enlarges the VM's windows: 1, 1.25, 1.5
 	// or 2.
 	Scale string `json:"scale"`
+	// Keyring is off or host: whether pvm encrypts the VM's login keyring
+	// with a password kept on the host and unlocks it for the apps.
+	Keyring string `json:"keyring"`
 }
 
 // maxRenderCPUs is the daemon's bound on --render-cpus.
@@ -263,6 +266,7 @@ func (c AppConfig) args() ([]string, error) {
 		{"--audio", c.Audio, []string{"off", "out", "both"}},
 		{"--audio-silence", c.AudioSilence, []string{"skip", "send"}},
 		{"--scale", c.Scale, []string{"1", "1.25", "1.5", "2"}},
+		{"--keyring", c.Keyring, []string{"off", "host"}},
 	} {
 		if f.value == "" {
 			continue

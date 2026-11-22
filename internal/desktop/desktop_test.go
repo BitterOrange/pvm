@@ -341,6 +341,7 @@ func TestActionArgv(t *testing.T) {
 		{"app settings, render cpus", task(func() (Task, error) { return app.ConfigureApps("dev1", AppConfig{RenderCPUs: "0"}) }), []string{"app config dev1 --render-cpus 0"}, ""},
 		{"app settings, audio silence", task(func() (Task, error) { return app.ConfigureApps("dev1", AppConfig{AudioSilence: "send"}) }), []string{"app config dev1 --audio-silence send"}, ""},
 		{"app settings, scale", task(func() (Task, error) { return app.ConfigureApps("dev1", AppConfig{Scale: "1.25"}) }), []string{"app config dev1 --scale 1.25"}, ""},
+		{"app settings, keyring", task(func() (Task, error) { return app.ConfigureApps("dev1", AppConfig{Keyring: "host"}) }), []string{"app config dev1 --keyring host"}, ""},
 		{"install", task(func() (Task, error) { return app.InstallApps("dev1", []string{"codex", "claude-desktop"}) }), []string{"app install dev1 codex claude-desktop"}, ""},
 		{"default vm", task(func() (Task, error) { return app.SetDefaultVM("dev1") }), []string{"default-vm dev1"}, ""},
 		{"clear default vm", task(app.ClearDefaultVM), []string{"default-vm --clear"}, ""},
@@ -468,6 +469,7 @@ func TestRefusals(t *testing.T) {
 		"config render cpus":      task(func() (Task, error) { return app.ConfigureApps("dev1", AppConfig{RenderCPUs: "-1"}) }),
 		"config render cpus text": task(func() (Task, error) { return app.ConfigureApps("dev1", AppConfig{RenderCPUs: "02"}) }),
 		"config scale":            task(func() (Task, error) { return app.ConfigureApps("dev1", AppConfig{Scale: "1.75"}) }),
+		"config keyring":          task(func() (Task, error) { return app.ConfigureApps("dev1", AppConfig{Keyring: "plain"}) }),
 		"install none":            task(func() (Task, error) { return app.InstallApps("dev1", nil) }),
 		"install flag":            task(func() (Task, error) { return app.InstallApps("dev1", []string{"--yes"}) }),
 		"install unknown":         task(func() (Task, error) { return app.InstallApps("dev1", []string{"nope"}) }),
@@ -542,6 +544,7 @@ func TestRefusals(t *testing.T) {
 		"create audio":        with(func(r *CreateRequest) { r.AppConfig.Audio = "loud" }),
 		"create silence":      with(func(r *CreateRequest) { r.AppConfig.AudioSilence = "quiet" }),
 		"create scale":        with(func(r *CreateRequest) { r.AppConfig.Scale = "1.0" }),
+		"create keyring":      with(func(r *CreateRequest) { r.AppConfig.Keyring = "on" }),
 		"create app":          with(func(r *CreateRequest) { r.Apps = []string{"nope"} }),
 	} {
 		if err := do(); err == nil {
@@ -580,8 +583,8 @@ func TestResizeAStoppedVM(t *testing.T) {
 func TestAppSettings(t *testing.T) {
 	f := newFixture(t)
 	for body, want := range map[string]AppConfig{
-		`{"clipboard":"off","drop":false,"audio":"out","audio_silence":"skip","render_cpus":2,"scale":1}`:    {Clipboard: "off", Drop: "off", Audio: "out", AudioSilence: "skip", RenderCPUs: "2", Scale: "1"},
-		`{"clipboard":"both","drop":true,"audio":"off","audio_silence":"send","render_cpus":0,"scale":1.25}`: {Clipboard: "both", Drop: "on", Audio: "off", AudioSilence: "send", RenderCPUs: "0", Scale: "1.25"},
+		`{"clipboard":"off","drop":false,"audio":"out","audio_silence":"skip","render_cpus":2,"scale":1,"keyring":"off"}`:     {Clipboard: "off", Drop: "off", Audio: "out", AudioSilence: "skip", RenderCPUs: "2", Scale: "1", Keyring: "off"},
+		`{"clipboard":"both","drop":true,"audio":"off","audio_silence":"send","render_cpus":0,"scale":1.25,"keyring":"host"}`: {Clipboard: "both", Drop: "on", Audio: "off", AudioSilence: "send", RenderCPUs: "0", Scale: "1.25", Keyring: "host"},
 	} {
 		f.daemon.set("/v1/vms/dev1/apps/config", body)
 		got, err := f.app.AppSettings("dev1")

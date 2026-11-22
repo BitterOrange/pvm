@@ -81,6 +81,21 @@ type appState struct {
 	// Scale is how much the host client enlarges the VM's windows, one of
 	// appScales; 0 is 1, no scaling.
 	Scale float64 `json:"scale,omitempty"`
+	// Keyring is off (the default: pvm leaves the VM's keyring alone) or
+	// host (the login keyring is encrypted with a password kept on the
+	// host and unlocked before apps start). Empty is not decided yet: the
+	// next server start moves pvm's earlier empty-password keyring to
+	// host, and records off for a VM without one.
+	Keyring string `json:"keyring,omitempty"`
+}
+
+var keyringModes = []string{"off", "host"}
+
+func (st *appState) keyring() string {
+	if st.Keyring == "" {
+		return "off"
+	}
+	return st.Keyring
 }
 
 // appScales are the window scales offered. At 1.25 the VM draws its
@@ -173,7 +188,7 @@ done
 
 // policy is the answer of the app config routes, with the defaults named.
 func (st *appState) policy() map[string]any {
-	return map[string]any{"clipboard": st.clipboard(), "drop": st.Drop, "audio": st.audio(), "audio_silence": st.audioSilence(), "render_cpus": st.renderCPUs(), "scale": st.scale()}
+	return map[string]any{"clipboard": st.clipboard(), "drop": st.Drop, "audio": st.audio(), "audio_silence": st.audioSilence(), "render_cpus": st.renderCPUs(), "scale": st.scale(), "keyring": st.keyring()}
 }
 
 // clipToGuest reports whether host clipboard content may enter the VM.
@@ -271,12 +286,25 @@ func (s *Server) saveAppState(name string, st *appState) error {
 
 // appSecret returns the host copy of the VM's Xpra password, creating it.
 func (s *Server) appSecret(name string) (string, string, error) {
-	p := filepath.Join(s.appDir(name), "xpra.secret")
+	return s.appSecretFile(name, "xpra.secret")
+}
+
+// appKeyringSecret is the password of the VM's login keyring when its
+// keyring setting is host. It is kept like the Xpra secret: never
+// replaced, as the keyring could not be opened without it.
+func (s *Server) appKeyringSecret(name string) (string, string, error) {
+	return s.appSecretFile(name, "keyring.secret")
+}
+
+// appSecretFile returns a random secret kept in the VM's app directory,
+// made on first use; a damaged one is an error, never silently replaced.
+func (s *Server) appSecretFile(name, file string) (string, string, error) {
+	p := filepath.Join(s.appDir(name), file)
 	raw, err := os.ReadFile(p)
 	if err == nil {
 		secret := strings.TrimSpace(string(raw))
 		if len(secret) != 64 {
-			return "", "", fmt.Errorf("invalid xpra secret in %s; restore it or move it away and retry", p)
+			return "", "", fmt.Errorf("invalid secret in %s; restore it or move it away and retry", p)
 		}
 		return p, secret, nil
 	}
@@ -326,25 +354,32 @@ func appInstallScript(late bool) string {
 //go:embed xpra_start.py
 var xpraStartPy string
 
-// appServerInput is the stdin of appServerScript.
-func appServerInput(secret string) string {
-	return secret + "\n" + xpraStartPy
+// appServerInput is the stdin of appServerScript: the Xpra secret, the
+// keyring password, empty unless the keyring setting needs it,
+// keyring.py up to appKeyringEnd, and xpra-start.py.
+func appServerInput(secret, keyringPassword string) string {
+	return secret + "\n" + keyringPassword + "\n" + keyringPy + "\n" + appKeyringEnd + "\n" + xpraStartPy
 }
 
-// keyringUnlockPy unlocks the Secret Service keyring for the apps; see
-// the file.
+// appKeyringEnd ends keyring.py on the server script's stdin.
+const appKeyringEnd = "# pvm: end of keyring.py"
+
+// keyringPy encrypts and unlocks the Secret Service keyring for the apps;
+// see the file.
 //
-//go:embed keyring_unlock.py
-var keyringUnlockPy string
+//go:embed keyring.py
+var keyringPy string
 
 // appServerScript starts the Xpra server unit unless it runs, and waits
-// for its display. Its stdin is appServerInput: the password, which stays
-// off the guest's process list, and xpra-start.py, as the ssh command line
+// for its display. Its stdin is appServerInput: the passwords, which stay
+// off the guest's process list, and the scripts, as the ssh command line
 // was cut off at about 8 KB. Linger keeps the user manager, and with it
 // the server, alive after the ssh session ends. silence is the VM's
 // audio_silence, which the server's audio processes read when a client
-// attaches.
-func appServerScript(silence string) string {
+// attaches. keyring is off, host or auto (see keyring.py); with host the
+// keyring is unlocked on every run, before any app starts, and a keyring
+// that cannot be unlocked fails the script.
+func appServerScript(silence, keyring string) string {
 	opts := []string{
 		// the server runs its own PulseAudio; the client decides whether
 		// sound and the microphone flow
@@ -367,7 +402,9 @@ d="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pvm"
 mkdir -p "$d"
 chmod 700 "$d"
 IFS= read -r secret
+IFS= read -r keyring_pw
 (umask 077; printf %s "$secret" > "$d/xpra.secret")
+while IFS= read -r line && [ "$line" != '` + appKeyringEnd + `' ]; do printf '%s\n' "$line"; done > "$d/keyring.py"
 cat > "$d/xpra-start.py"
 printf %s ` + shellQuote(silence) + ` > "$d/audio-silence"
 # services D-Bus starts for apps, such as the desktop portal's GTK
@@ -378,9 +415,17 @@ env="DISPLAY=` + appDisplay + `"
 command -v pulseaudio >/dev/null && env="$env PULSE_SERVER=unix:${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/xpra/` + strings.TrimPrefix(appDisplay, ":") + `/pulse/native"
 dbus-update-activation-environment --systemd $env 2>/dev/null || systemctl --user set-environment $env
 systemctl --user reset-failed xdg-desktop-portal.service xdg-desktop-portal-gtk.service >/dev/null 2>&1 || true
-if command -v gnome-keyring-daemon >/dev/null; then
-  python3 - <<'PVMEOF' || echo "pvm: could not unlock the keyring; apps may ask for its password" >&2
-` + keyringUnlockPy + `PVMEOF
+keyring=` + shellQuote(keyring) + `
+if [ "$keyring" != off ] && command -v gnome-keyring-daemon >/dev/null; then
+  rc=0
+  printf %s "$keyring_pw" | python3 "$d/keyring.py" "$keyring" || rc=$?
+  if [ "$rc" = 3 ]; then
+    echo "the login keyring in the vm has a password pvm did not set, so pvm leaves it locked and starts no app; keep it with --keyring off, or move ~/.local/share/keyrings/login.keyring away in the vm for pvm to make a new one (the secrets in it are lost)" >&2
+    exit 3
+  elif [ "$rc" != 0 ]; then
+    echo "could not unlock the keyring, so no app starts: apps would fall back to another key and lose their sign-in" >&2
+    exit 1
+  fi
 fi
 if ! systemctl --user is-active --quiet ` + appServerUnit + `; then
   systemctl --user reset-failed ` + appServerUnit + ` >/dev/null 2>&1 || true
@@ -717,8 +762,29 @@ func (s *Server) ensureAppServer(ctx context.Context, spec *vm.Spec, st *appStat
 	if err != nil {
 		return err
 	}
-	if out, err := s.sshRunInputCtx(ctx, spec, appServerScript(st.audioSilence()), appServerInput(secret)); err != nil {
+	keyring, keyringPassword := st.Keyring, ""
+	if keyring == "" {
+		keyring = "auto"
+	}
+	if keyring != "off" {
+		if _, keyringPassword, err = s.appKeyringSecret(spec.Name); err != nil {
+			return err
+		}
+	}
+	out, err := s.sshRunInputCtx(ctx, spec, appServerScript(st.audioSilence(), keyring), appServerInput(secret, keyringPassword))
+	if err != nil {
 		return fmt.Errorf("start xpra server in %s: %v%s", spec.Name, err, indentOutput(out))
+	}
+	// the caller holds the app lock
+	if keyring == "auto" {
+		st.Keyring = "off"
+		if hasLine(out, "PVM_KEYRING=host") {
+			st.Keyring = "host"
+			log.Printf("app %s: moved the keyring pvm made to host", spec.Name)
+		}
+		if err := s.saveAppState(spec.Name, st); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1201,6 +1267,7 @@ func (s *Server) handleAppConfig(w http.ResponseWriter, r *http.Request) {
 		AudioSilence string   `json:"audio_silence"`
 		RenderCPUs   *int     `json:"render_cpus"`
 		Scale        *float64 `json:"scale"`
+		Keyring      string   `json:"keyring"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, fmt.Errorf("bad request: %v", err))
@@ -1268,6 +1335,14 @@ func (s *Server) handleAppConfig(w http.ResponseWriter, r *http.Request) {
 		if st.Scale == 1 {
 			st.Scale = 0
 		}
+	}
+	if req.Keyring != "" {
+		if !slices.Contains(keyringModes, req.Keyring) {
+			writeErr(w, 400, fmt.Errorf("--keyring must be one of %s", strings.Join(keyringModes, ", ")))
+			return
+		}
+		// off is kept too: a decided VM is never moved to host
+		st.Keyring = req.Keyring
 	}
 	if err := s.saveAppState(name, st); err != nil {
 		writeErr(w, 500, err)

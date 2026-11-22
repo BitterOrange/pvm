@@ -62,6 +62,11 @@ export const en = {
       "The VM draws its windows at fewer pixels and the host enlarges them: at 1.5 it draws less than half as many. Programs such as Claude Desktop then draw faster, and text keeps its size but looks softer. Open windows are attached again to apply it and keep their size on the host.",
     scaleOf: (scale: string) => scale + "×",
     scaleNone: "No scaling",
+    keyring: "Keyring",
+    keyringOff: "Left to the VM",
+    keyringHost: "Password kept on this computer",
+    keyringHint:
+      "With the password kept on this computer, the VM's login keyring is encrypted and pvm unlocks it before apps start, so apps such as Claude Desktop stay signed in. Left to the VM, pvm does not touch it, and apps may ask for its password. After a switch away from the kept password, such apps must sign in again once the VM restarts.",
   },
 
   // The numbers of a VM, in the Create form and in Resize.

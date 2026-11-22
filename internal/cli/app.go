@@ -29,7 +29,7 @@ const appUsage = `[<vm>] <url> [--name ID] [--kiosk] [--no-attach] [--yes]
        pvm app install [<vm>] <id>... [--yes]
        pvm app stop [<vm>] [<id> | --all]
        pvm app attach [<vm>] [--yes]
-       pvm app config [<vm>] [--clipboard off|to-guest|to-host|both] [--drop on|off] [--audio off|out|both] [--audio-silence skip|send] [--render-cpus N] [--scale 1|1.25|1.5|2]`
+       pvm app config [<vm>] [--clipboard off|to-guest|to-host|both] [--drop on|off] [--audio off|out|both] [--audio-silence skip|send] [--render-cpus N] [--scale 1|1.25|1.5|2] [--keyring off|host]`
 
 type appView struct {
 	VM    string   `json:"vm"`
@@ -201,13 +201,14 @@ func CmdApp(args []string) int {
 		fmt.Printf("xpra client started for %s\n", vmName)
 		return 0
 	case "config":
-		const usage = "[<vm>] [--clipboard off|to-guest|to-host|both] [--drop on|off] [--audio off|out|both] [--audio-silence skip|send] [--render-cpus N] [--scale 1|1.25|1.5|2]"
+		const usage = "[<vm>] [--clipboard off|to-guest|to-host|both] [--drop on|off] [--audio off|out|both] [--audio-silence skip|send] [--render-cpus N] [--scale 1|1.25|1.5|2] [--keyring off|host]"
 		fs := newFlagSet("app config", usage)
 		clip := fs.String("clipboard", "", "off, to-guest (host to vm), to-host (vm to host) or both")
 		drop := fs.String("drop", "", "on: files dropped on the vm's windows upload into ~/Downloads in the vm")
 		audio := fs.String("audio", "", "out (vm sound on the host speakers), both (also the host microphone into the vm) or off")
 		silence := fs.String("audio-silence", "", "skip (default: no sound is sent while the vm plays none, which saves cpu) or send")
 		renderCPUs := fs.Int("render-cpus", -1, "vCPUs the renderers of Chromium and Electron apps may use (default 2; 0: no limit)")
+		keyring := fs.String("keyring", "", "off (default: pvm leaves the vm's keyring alone) or host (the login keyring is encrypted with a password kept on this host and unlocked before apps start)")
 		scale := fs.String("scale", "", "how much the host enlarges the vm's windows: 1 (default), 1.25, 1.5 or 2; the vm draws them at fewer pixels, which is faster and softer")
 		if err := fs.Parse(flagsFirst(fs, args[1:])); err != nil {
 			return 2
@@ -240,6 +241,9 @@ func CmdApp(args []string) int {
 			}
 			body["scale"] = v
 		}
+		if *keyring != "" {
+			body["keyring"] = *keyring
+		}
 		c, err := ensureDaemon(p)
 		if err != nil {
 			return fatalf("%v", err)
@@ -255,6 +259,7 @@ func CmdApp(args []string) int {
 			AudioSilence string  `json:"audio_silence"`
 			RenderCPUs   int     `json:"render_cpus"`
 			Scale        float64 `json:"scale"`
+			Keyring      string  `json:"keyring"`
 			// Attached is a client connected to the vm; RescaleError says
 			// why its windows were not sized for a new scale.
 			Attached     bool   `json:"attached"`
@@ -271,7 +276,7 @@ func CmdApp(args []string) int {
 		if out.RenderCPUs > 0 {
 			renderS = strconv.Itoa(out.RenderCPUs)
 		}
-		fmt.Printf("%s: clipboard %s, drop %s, audio %s, audio silence %s, render cpus %s, scale %s\n", vmName, out.Clipboard, dropS, out.Audio, out.AudioSilence, renderS, strconv.FormatFloat(out.Scale, 'f', -1, 64))
+		fmt.Printf("%s: clipboard %s, drop %s, audio %s, audio silence %s, render cpus %s, scale %s, keyring %s\n", vmName, out.Clipboard, dropS, out.Audio, out.AudioSilence, renderS, strconv.FormatFloat(out.Scale, 'f', -1, 64), out.Keyring)
 		if out.Clipboard == "to-guest" || out.Clipboard == "both" {
 			fmt.Println("host clipboard content enters the vm when one of its windows comes to the front, and when you copy while it is there")
 		}
@@ -284,6 +289,14 @@ func CmdApp(args []string) int {
 		if _, ok := body["render_cpus"]; ok {
 			fmt.Println("render cpus apply to apps started from now on")
 			delete(body, "render_cpus")
+		}
+		if _, ok := body["keyring"]; ok {
+			if out.Keyring == "host" {
+				fmt.Println("the login keyring in the vm gets a password kept on this host, and is unlocked before apps start, from the next app start or attach on")
+			} else {
+				fmt.Println("pvm no longer unlocks the keyring in the vm: once the vm restarts, apps that kept secrets in it, such as Claude Desktop, ask for its password or must sign in again")
+			}
+			delete(body, "keyring")
 		}
 		if len(body) == 0 {
 			return 0

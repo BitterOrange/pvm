@@ -78,14 +78,15 @@ func TestAppScriptsParse(t *testing.T) {
 		t.Skip("no sh")
 	}
 	scripts := map[string]string{
-		"install": appInstallScript(true),
-		"server":  appServerScript("skip"),
-		"cmd":     appLaunchScript(&appRecord{ID: "gedit", Kind: "cmd", Argv: []string{"gedit", "it's a file; rm -rf ~", "$(id)"}}, "", "", 0),
-		"cwd":     appLaunchScript(&appRecord{ID: "gedit", Kind: "cmd", Argv: []string{"gedit"}}, "/workspace/web/it's a dir; $(id)", "/workspace/web", 0),
-		"pin":     appLaunchScript(&appRecord{ID: "claude", Kind: "cmd", Argv: []string{"claude-desktop"}}, "", "", 2),
-		"url":     appLaunchScript(&appRecord{ID: "mail", Kind: "url", URL: "https://example.com/?a=1&b='2'", Kiosk: true}, "", "", 0),
-		"stop":    appStopScript([]appRecord{{ID: "gedit"}, {ID: "mail", Kind: "url", Window: "0x00c00003"}}, false),
-		"rescale": appRescaleScript(1.25 / 1.5),
+		"install":    appInstallScript(true),
+		"server":     appServerScript("skip", "host"),
+		"no keyring": appServerScript("skip", "off"),
+		"cmd":        appLaunchScript(&appRecord{ID: "gedit", Kind: "cmd", Argv: []string{"gedit", "it's a file; rm -rf ~", "$(id)"}}, "", "", 0),
+		"cwd":        appLaunchScript(&appRecord{ID: "gedit", Kind: "cmd", Argv: []string{"gedit"}}, "/workspace/web/it's a dir; $(id)", "/workspace/web", 0),
+		"pin":        appLaunchScript(&appRecord{ID: "claude", Kind: "cmd", Argv: []string{"claude-desktop"}}, "", "", 2),
+		"url":        appLaunchScript(&appRecord{ID: "mail", Kind: "url", URL: "https://example.com/?a=1&b='2'", Kiosk: true}, "", "", 0),
+		"stop":       appStopScript([]appRecord{{ID: "gedit"}, {ID: "mail", Kind: "url", Window: "0x00c00003"}}, false),
+		"rescale":    appRescaleScript(1.25 / 1.5),
 	}
 	for name, s := range scripts {
 		if out, err := exec.Command(sh, "-n", "-c", s).CombinedOutput(); err != nil {
@@ -99,11 +100,24 @@ func TestAppScriptsParse(t *testing.T) {
 	}
 	// the audio processes read the setting when a client attaches, and
 	// start through xpra-start.py
-	if send := appServerScript("send"); !strings.Contains(send, `printf %s 'send' > "$d/audio-silence"`) || !strings.Contains(send, `-E "XPRA_AUDIO_COMMAND=python3 $d/xpra-start.py"`) {
+	if send := appServerScript("send", "off"); !strings.Contains(send, `printf %s 'send' > "$d/audio-silence"`) || !strings.Contains(send, `-E "XPRA_AUDIO_COMMAND=python3 $d/xpra-start.py"`) {
 		t.Errorf("server script does not pass the audio silence setting:\n%s", send)
 	}
 	if !strings.Contains(scripts["server"], `python3 "$d/xpra-start.py" start `+appDisplay+` --bind=`) {
 		t.Errorf("server script does not start the server on %s:\n%s", appDisplay, scripts["server"])
+	}
+	// the keyring is unlocked with the password from stdin, and a keyring
+	// that cannot be unlocked stops the script; off leaves it alone
+	for _, want := range []string{`keyring='host'`, `printf %s "$keyring_pw" | python3 "$d/keyring.py" "$keyring" || rc=$?`, "exit 3", "exit 1"} {
+		if !strings.Contains(scripts["server"], want) {
+			t.Errorf("server script lacks %q", want)
+		}
+	}
+	if !strings.Contains(scripts["no keyring"], `keyring='off'`) {
+		t.Errorf("server script with the keyring off:\n%s", scripts["no keyring"])
+	}
+	if strings.Contains(keyringPy, "\n"+appKeyringEnd+"\n") {
+		t.Error("keyring.py contains the line that ends it on stdin")
 	}
 	if !strings.Contains(scripts["cmd"], `'it'"'"'s a file; rm -rf ~'`) || !strings.Contains(scripts["cmd"], `'$(id)'`) {
 		t.Errorf("cmd arguments not quoted:\n%s", scripts["cmd"])
@@ -329,16 +343,16 @@ func TestAppConfigRoutes(t *testing.T) {
 		}
 		return strings.TrimSpace(rr.Body.String())
 	}
-	if got, want := call("GET", ""), `{"audio":"out","audio_silence":"skip","clipboard":"off","drop":false,"render_cpus":2,"scale":1}`; got != want {
+	if got, want := call("GET", ""), `{"audio":"out","audio_silence":"skip","clipboard":"off","drop":false,"keyring":"off","render_cpus":2,"scale":1}`; got != want {
 		t.Errorf("a vm without app state: %s, want %s", got, want)
 	}
 	// PUT also says whether a client is attached, to attach it again; with
 	// none, a new scale moves no window
-	set := call("PUT", `{"clipboard":"both","drop":true,"audio":"off","audio_silence":"send","render_cpus":0,"scale":1.25}`)
-	if got := call("GET", ""); set != `{"attached":false,"audio":"off","audio_silence":"send","clipboard":"both","drop":true,"render_cpus":0,"scale":1.25}` || got != `{"audio":"off","audio_silence":"send","clipboard":"both","drop":true,"render_cpus":0,"scale":1.25}` {
+	set := call("PUT", `{"clipboard":"both","drop":true,"audio":"off","audio_silence":"send","render_cpus":0,"scale":1.25,"keyring":"host"}`)
+	if got := call("GET", ""); set != `{"attached":false,"audio":"off","audio_silence":"send","clipboard":"both","drop":true,"keyring":"host","render_cpus":0,"scale":1.25}` || got != `{"audio":"off","audio_silence":"send","clipboard":"both","drop":true,"keyring":"host","render_cpus":0,"scale":1.25}` {
 		t.Errorf("after the change: GET %s, PUT answered %s", got, set)
 	}
-	if got := call("PUT", `{"render_cpus":4}`); got != `{"attached":false,"audio":"off","audio_silence":"send","clipboard":"both","drop":true,"render_cpus":4,"scale":1.25}` {
+	if got := call("PUT", `{"render_cpus":4}`); got != `{"attached":false,"audio":"off","audio_silence":"send","clipboard":"both","drop":true,"keyring":"host","render_cpus":4,"scale":1.25}` {
 		t.Errorf("render cpus 4: %s", got)
 	}
 	// the defaults are not stored
@@ -351,7 +365,13 @@ func TestAppConfigRoutes(t *testing.T) {
 	if got := call("PUT", `{"scale":2}`); !strings.Contains(got, `"scale":2}`) {
 		t.Errorf("scale 2: %s", got)
 	}
-	for body, flag := range map[string]string{`{"render_cpus":-1}`: "--render-cpus", `{"render_cpus":257}`: "--render-cpus", `{"audio_silence":"loud"}`: "--audio-silence", `{"scale":1.75}`: "--scale must be 1, 1.25, 1.5 or 2", `{"scale":0}`: "--scale", `{"scale":"2"}`: "bad request"} {
+	// off is kept, unlike the other defaults: an undecided VM may still be
+	// moved to host, a decided one never
+	call("PUT", `{"keyring":"off"}`)
+	if st, err := s.loadAppState("dev1"); err != nil || st.Keyring != "off" {
+		t.Errorf("stored keyring %q, %v; want off kept", st.Keyring, err)
+	}
+	for body, flag := range map[string]string{`{"render_cpus":-1}`: "--render-cpus", `{"render_cpus":257}`: "--render-cpus", `{"audio_silence":"loud"}`: "--audio-silence", `{"scale":1.75}`: "--scale must be 1, 1.25, 1.5 or 2", `{"scale":0}`: "--scale", `{"scale":"2"}`: "bad request", `{"keyring":"plain"}`: "--keyring must be one of off, host"} {
 		rr := httptest.NewRecorder()
 		s.handler().ServeHTTP(rr, httptest.NewRequest("PUT", "/v1/vms/dev1/apps/config", strings.NewReader(body)))
 		if rr.Code != 400 || !strings.Contains(rr.Body.String(), flag) {
@@ -365,29 +385,66 @@ func TestAppConfigRoutes(t *testing.T) {
 	}
 }
 
+// The Xpra secret and the keyring password are made once, kept, and never
+// replaced when damaged: a new keyring password would lock the keyring
+// for good.
 func TestAppSecretPersistsAndRejectsCorruption(t *testing.T) {
 	s := newAuditTestServer(t, &vm.Spec{Name: "dev1", User: "u"})
-	_, secret, err := s.appSecret("dev1")
-	if err != nil {
-		t.Fatal(err)
+	_, xpra, _ := s.appSecret("dev1")
+	_, keyring, _ := s.appKeyringSecret("dev1")
+	if xpra == "" || xpra == keyring {
+		t.Errorf("secrets %q and %q; want two", xpra, keyring)
 	}
-	_, again, err := s.appSecret("dev1")
-	if err != nil || again != secret {
-		t.Fatalf("valid secret changed: %v", err)
+	for file, get := range map[string]func(string) (string, string, error){"xpra.secret": s.appSecret, "keyring.secret": s.appKeyringSecret} {
+		_, secret, err := get("dev1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, again, err := get("dev1")
+		if err != nil || again != secret {
+			t.Fatalf("%s: valid secret changed: %v", file, err)
+		}
+		path := filepath.Join(s.appDir("dev1"), file)
+		if err := os.WriteFile(path, []byte("broken"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := get("dev1"); err == nil {
+			t.Fatalf("%s: corrupt secret was silently replaced", file)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != "broken" {
+			t.Fatalf("%s: corrupt secret was overwritten: %q", file, data)
+		}
 	}
-	path := filepath.Join(s.appDir("dev1"), "xpra.secret")
-	if err := os.WriteFile(path, []byte("broken"), 0o600); err != nil {
-		t.Fatal(err)
+}
+
+// The server script takes the secrets and both scripts from one stdin,
+// each whole.
+func TestAppServerInputSplits(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a POSIX shell")
 	}
-	if _, _, err := s.appSecret("dev1"); err == nil {
-		t.Fatal("corrupt secret was silently replaced")
+	script := appServerScript("skip", "host")
+	i, j := strings.Index(script, "IFS= read -r secret"), strings.Index(script, `cat > "$d/xpra-start.py"`)
+	if i < 0 || j < i {
+		t.Fatalf("server script reads its stdin differently:\n%s", script)
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
+	d := t.TempDir()
+	c := exec.Command("sh", "-c", script[i:j]+`cat > "$d/xpra-start.py"`+"\nprintf '%s|%s' \"$secret\" \"$keyring_pw\"")
+	c.Env = append(os.Environ(), "d="+d)
+	c.Stdin = strings.NewReader(appServerInput("SECRET", "PASSWORD"))
+	out, err := c.CombinedOutput()
+	if err != nil || string(out) != "SECRET|PASSWORD" {
+		t.Fatalf("secrets %q, %v", out, err)
 	}
-	if string(data) != "broken" {
-		t.Fatalf("corrupt secret was overwritten: %q", data)
+	for file, want := range map[string]string{"keyring.py": keyringPy, "xpra-start.py": xpraStartPy} {
+		got, err := os.ReadFile(filepath.Join(d, file))
+		if err != nil || strings.TrimRight(string(got), "\n") != strings.TrimRight(want, "\n") {
+			t.Errorf("%s arrived as %d bytes of %d: %v", file, len(got), len(want), err)
+		}
 	}
 }
 
