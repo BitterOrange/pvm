@@ -90,6 +90,11 @@ func TestAppScriptsParse(t *testing.T) {
 		if out, err := exec.Command(sh, "-n", "-c", s).CombinedOutput(); err != nil {
 			t.Errorf("%s script: %v: %s", name, err, out)
 		}
+		// they travel as the ssh command line, which was cut off at
+		// about 8 KB
+		if len(s) > 6000 {
+			t.Errorf("%s script is %d bytes; send the long part on stdin", name, len(s))
+		}
 	}
 	if !strings.Contains(scripts["cmd"], `'it'"'"'s a file; rm -rf ~'`) || !strings.Contains(scripts["cmd"], `'$(id)'`) {
 		t.Errorf("cmd arguments not quoted:\n%s", scripts["cmd"])

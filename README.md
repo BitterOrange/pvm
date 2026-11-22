@@ -30,7 +30,7 @@ Planned:
 - [ ] The full name: Proxied Virtual Machine (PVM), to be agreed upstream
 - [ ] WHPX: AVX in VMs, and a QEMU chosen per VM (the bundled or own build, or the system's)
 - [ ] `pvm app`: the keyring as a setting, `off` by default or `host` (encrypted, unlocked from the host), tested with Claude Desktop
-- [ ] `pvm app`: host-to-guest clipboard on macOS and Linux, WSL2, reliable input method text, and candidates that follow the text cursor
+- [ ] `pvm app`: host-to-guest clipboard on macOS and Linux, WSL2, and input method text in programs without ibus
 - [ ] `pvm desktop` as a host window like `pvm app`, opening the workspace folder in the VM's file manager
 - [ ] PVM Desktop: the installer test on Windows, keeping the workspace form when its VM is stopped, "Create PVM workspace" in the Explorer menu, a tray icon, and screens for snapshots, port maps and mounts
 - [ ] `pvm exit-agent install|uninstall` as a systemd service
@@ -158,7 +158,7 @@ pvm app catalog
 pvm app install dev1 claude-code codex claude-desktop
 ```
 
-Clipboard and drops are off until you enable them per VM. With `--clipboard to-guest` or `both`, host content enters the VM only when one of its windows comes to the front or you copy while it is there, and content that password managers mark as excluded is never sent. Text, images and, on Windows hosts, files and folders copy both ways. Text typed with a host input method, such as Chinese with Microsoft Pinyin or emoji from the emoji panel, reaches the app as well. Sound plays on the host's speakers; `--audio both` also lends the VM the host's microphone. The renderers of Chromium and Electron apps, such as Claude Desktop, run on 2 vCPUs, which draws faster than all of them in a VM; `--render-cpus N` changes that for apps started afterwards, and `0` lifts the limit. See [docs/design/app.md](docs/design/app.md).
+Clipboard and drops are off until you enable them per VM. With `--clipboard to-guest` or `both`, host content enters the VM only when one of its windows comes to the front or you copy while it is there, and content that password managers mark as excluded is never sent. Text, images and, on Windows hosts, files and folders copy both ways. Text typed with a host input method, such as Chinese with Microsoft Pinyin or emoji from the emoji panel, reaches the app as well, and on Windows hosts the input method's candidates open at the app's text cursor. Sound plays on the host's speakers; `--audio both` also lends the VM the host's microphone. The renderers of Chromium and Electron apps, such as Claude Desktop, run on 2 vCPUs, which draws faster than all of them in a VM; `--render-cpus N` changes that for apps started afterwards, and `0` lifts the limit. See [docs/design/app.md](docs/design/app.md).
 
 `pvm app catalog` lists the apps pvm can install for you: Claude Code, Codex CLI, Claude Desktop and Firefox, each the vendor's official Linux build. `pvm app install [<vm>] <id>...` runs the app's built-in install script as root inside the VM; downloads happen in the VM and leave through its exit, never through the host. `pvm app ls` also shows the catalog apps each VM has, including ones installed with the image or by hand.
 

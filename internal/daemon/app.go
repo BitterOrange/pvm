@@ -263,6 +263,11 @@ func appInstallScript(late bool) string {
 //go:embed xpra_start.py
 var xpraStartPy string
 
+// appServerInput is the stdin of appServerScript.
+func appServerInput(secret string) string {
+	return secret + "\n" + xpraStartPy
+}
+
 // keyringUnlockPy unlocks the Secret Service keyring for the apps; see
 // the file.
 //
@@ -270,8 +275,10 @@ var xpraStartPy string
 var keyringUnlockPy string
 
 // appServerScript starts the Xpra server unit unless it runs, and waits
-// for its display. The password arrives on stdin. Linger keeps the user
-// manager, and with it the server, alive after the ssh session ends.
+// for its display. Its stdin is appServerInput: the password, which stays
+// off the guest's process list, and xpra-start.py, as the ssh command line
+// was cut off at about 8 KB. Linger keeps the user manager, and with it
+// the server, alive after the ssh session ends.
 func appServerScript() string {
 	opts := []string{
 		// the server runs its own PulseAudio; the client decides whether
@@ -294,9 +301,9 @@ loginctl show-user "$USER" -p Linger 2>/dev/null | grep -qx Linger=yes || sudo -
 d="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pvm"
 mkdir -p "$d"
 chmod 700 "$d"
-(umask 077; cat > "$d/xpra.secret")
-cat > "$d/xpra-start.py" <<'PVMEOF'
-` + xpraStartPy + `PVMEOF
+IFS= read -r secret
+(umask 077; printf %s "$secret" > "$d/xpra.secret")
+cat > "$d/xpra-start.py"
 # services D-Bus starts for apps, such as the desktop portal's GTK
 # backend, need the display; without it the portal hung until a timeout
 # and GTK apps waited a minute for it before showing a window. Apps play
@@ -644,7 +651,7 @@ func (s *Server) ensureAppServer(ctx context.Context, spec *vm.Spec) error {
 	if err != nil {
 		return err
 	}
-	if out, err := s.sshRunInputCtx(ctx, spec, appServerScript(), secret); err != nil {
+	if out, err := s.sshRunInputCtx(ctx, spec, appServerScript(), appServerInput(secret)); err != nil {
 		return fmt.Errorf("start xpra server in %s: %v%s", spec.Name, err, indentOutput(out))
 	}
 	return nil
