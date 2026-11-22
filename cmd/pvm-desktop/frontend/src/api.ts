@@ -84,6 +84,7 @@ export interface AppConfig {
   clipboard: string; // off, to-guest, to-host or both
   drop: string; // on or off
   audio: string; // off, out or both
+  audio_silence: string; // skip or send
   render_cpus: string; // vCPUs for Chromium renderers, 0 no limit
 }
 

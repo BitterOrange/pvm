@@ -51,15 +51,16 @@ src=$(find "$WORK/unpacked" -mindepth 1 -maxdepth 1 -type d)
   || { echo "error: unexpected layout in $XPRA_ZIP" >&2; exit 1; }
 cp -R "$src"/. "$DEST"/
 PATCH_DIR=$(cd "$(dirname "$0")/xpra-patch" && pwd)
-for m in client/gui/keyboard_helper client/gui/window_base client/subsystem/audio; do
+for m in client/gui/keyboard_helper client/gui/window_base client/subsystem/audio audio/src; do
   [ -f "$DEST/lib/xpra/$m.pyc" ] || { echo "error: $XPRA_ZIP has no lib/xpra/$m.pyc to patch" >&2; exit 1; }
   cp "$PATCH_DIR/${m##*/}.py" "$DEST/lib/xpra/$m.py"
 done
 cat > "$DEST/XPRA-SOURCE.txt" <<EOF
 This folder holds the Xpra client ${XPRA_ZIP%.zip}, as published at
-$XPRA_BASE_URL/$XPRA_ZIP, with three files added by pvm:
-lib/xpra/client/gui/keyboard_helper.py, lib/xpra/client/gui/window_base.py
-and lib/xpra/client/subsystem/audio.py, whose source is each file itself.
+$XPRA_BASE_URL/$XPRA_ZIP, with four files added by pvm:
+lib/xpra/client/gui/keyboard_helper.py, lib/xpra/client/gui/window_base.py,
+lib/xpra/client/subsystem/audio.py and lib/xpra/audio/src.py, whose source
+is each file itself.
 Xpra is free software under the GNU General Public License version 2 or
 later; see share/xpra/COPYING. Its source code is available at
 https://github.com/Xpra-org/xpra and https://xpra.org/src/.

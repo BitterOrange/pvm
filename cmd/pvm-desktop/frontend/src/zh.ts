@@ -41,6 +41,10 @@ export const zh: Messages = {
     both: "双向",
     audioOut: "虚拟机声音从宿主机扬声器播放",
     audioBoth: "扬声器和宿主机麦克风",
+    audioSilence: "静音",
+    silenceSkip: "不发送，节省 CPU",
+    silenceSend: "和其他声音一样发送",
+    audioSilenceHint: "虚拟机没有播放声音时，不向宿主机发送任何音频，虚拟机保持空闲。下次连接窗口时生效。",
     renderCpus: "渲染进程 CPU 数",
     renderCpusHint:
       "只限制 Chromium 和 Electron 程序（比如 Claude Desktop）的渲染进程，程序的其他工作仍可用全部 vCPU。滑到最右或填 0 表示不限制。对之后启动的程序生效。",

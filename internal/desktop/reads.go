@@ -228,15 +228,16 @@ func (a *App) AppSettings(vm string) (AppConfig, error) {
 		return AppConfig{}, err
 	}
 	var resp struct {
-		Clipboard  string `json:"clipboard"`
-		Drop       bool   `json:"drop"`
-		Audio      string `json:"audio"`
-		RenderCPUs int    `json:"render_cpus"`
+		Clipboard    string `json:"clipboard"`
+		Drop         bool   `json:"drop"`
+		Audio        string `json:"audio"`
+		AudioSilence string `json:"audio_silence"`
+		RenderCPUs   int    `json:"render_cpus"`
 	}
 	if err := a.daemon.Get("/v1/vms/"+url.PathEscape(vm)+"/apps/config", &resp); err != nil {
 		return AppConfig{}, err
 	}
-	c := AppConfig{Clipboard: resp.Clipboard, Drop: "off", Audio: resp.Audio, RenderCPUs: strconv.Itoa(resp.RenderCPUs)}
+	c := AppConfig{Clipboard: resp.Clipboard, Drop: "off", Audio: resp.Audio, AudioSilence: resp.AudioSilence, RenderCPUs: strconv.Itoa(resp.RenderCPUs)}
 	if resp.Drop {
 		c.Drop = "on"
 	}

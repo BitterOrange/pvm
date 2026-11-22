@@ -86,12 +86,13 @@ export function appConfigChoices(): Record<ChoiceSetting, { value: string; label
     clipboard: [{ value: "off", label: c.off }, { value: "to-guest", label: c.toGuest }, { value: "to-host", label: c.toHost }, { value: "both", label: c.both }],
     drop: [{ value: "off", label: c.off }, { value: "on", label: c.on }],
     audio: [{ value: "out", label: c.audioOut }, { value: "both", label: c.audioBoth }, { value: "off", label: c.off }],
+    audio_silence: [{ value: "skip", label: c.silenceSkip }, { value: "send", label: c.silenceSend }],
   };
 }
 
 // What the Create form starts from: the app settings of a VM that
 // `pvm app config` has not been run for.
-export const newAppConfig: AppConfig = { clipboard: "off", drop: "off", audio: "out", render_cpus: "2" };
+export const newAppConfig: AppConfig = { clipboard: "off", drop: "off", audio: "out", audio_silence: "skip", render_cpus: "2" };
 
 
 // programCard is a catalog program to tick. The name and the description
@@ -236,6 +237,7 @@ function settingsDialog(vm: VM): void {
     clipboard: select(choices.clipboard, newAppConfig.clipboard),
     drop: select(choices.drop, newAppConfig.drop),
     audio: select(choices.audio, newAppConfig.audio),
+    audio_silence: select(choices.audio_silence, newAppConfig.audio_silence),
   };
   // the slider ends at the VM's vCPUs
   const render = renderControl("settings:render");
@@ -247,7 +249,13 @@ function settingsDialog(vm: VM): void {
   // a setting the user did not move is left as it is, even one above
   // the VM's vCPUs, which the slider shows at its end
   const renderChanged = (): string => (!render.touched() || render.bad() || render.value() === now?.render_cpus ? "" : render.value());
-  const change = (): AppConfig => ({ clipboard: changed("clipboard"), drop: changed("drop"), audio: changed("audio"), render_cpus: renderChanged() });
+  const change = (): AppConfig => ({
+    clipboard: changed("clipboard"),
+    drop: changed("drop"),
+    audio: changed("audio"),
+    audio_silence: changed("audio_silence"),
+    render_cpus: renderChanged(),
+  });
   const d = dialog({
     title: t.vms.settingsTitle(mono(vm.name)),
     text: [t.vms.settingsText],
@@ -270,11 +278,13 @@ function settingsDialog(vm: VM): void {
         controls.clipboard.value = config.clipboard;
         controls.drop.value = config.drop;
         controls.audio.value = config.audio;
+        controls.audio_silence.value = config.audio_silence;
         render.load(config.render_cpus);
         fields.replaceChildren(
           field(t.appConfig.clipboard, controls.clipboard),
           field(t.appConfig.drop, controls.drop, ...t.vms.dropHint(mono("~/Downloads"))),
           field(t.appConfig.audio, controls.audio),
+          field(t.appConfig.audioSilence, controls.audio_silence, t.appConfig.audioSilenceHint),
           render.field,
         );
         controls.clipboard.focus();

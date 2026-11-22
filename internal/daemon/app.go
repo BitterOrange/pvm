@@ -70,6 +70,9 @@ type appState struct {
 	// Audio is out (the default: VM sound plays on the host), both (the
 	// host microphone also reaches the VM) or off.
 	Audio string `json:"audio,omitempty"`
+	// AudioSilence is skip (the default: nothing is sent while the VM plays
+	// nothing) or send.
+	AudioSilence string `json:"audio_silence,omitempty"`
 	// Installed are the catalog apps `pvm app install` put into the VM.
 	Installed []string `json:"installed,omitempty"`
 	// RenderCPUs is how many vCPUs the renderers of a Chromium app may
@@ -103,6 +106,15 @@ func (st *appState) audio() string {
 	return st.Audio
 }
 
+var audioSilenceModes = []string{"skip", "send"}
+
+func (st *appState) audioSilence() string {
+	if st.AudioSilence == "" {
+		return "skip"
+	}
+	return st.AudioSilence
+}
+
 func (st *appState) clipboard() string {
 	if st.Clipboard == "" {
 		return "off"
@@ -112,7 +124,7 @@ func (st *appState) clipboard() string {
 
 // policy is the answer of the app config routes, with the defaults named.
 func (st *appState) policy() map[string]any {
-	return map[string]any{"clipboard": st.clipboard(), "drop": st.Drop, "audio": st.audio(), "render_cpus": st.renderCPUs()}
+	return map[string]any{"clipboard": st.clipboard(), "drop": st.Drop, "audio": st.audio(), "audio_silence": st.audioSilence(), "render_cpus": st.renderCPUs()}
 }
 
 // clipToGuest reports whether host clipboard content may enter the VM.
@@ -278,8 +290,10 @@ var keyringUnlockPy string
 // for its display. Its stdin is appServerInput: the password, which stays
 // off the guest's process list, and xpra-start.py, as the ssh command line
 // was cut off at about 8 KB. Linger keeps the user manager, and with it
-// the server, alive after the ssh session ends.
-func appServerScript() string {
+// the server, alive after the ssh session ends. silence is the VM's
+// audio_silence, which the server's audio processes read when a client
+// attaches.
+func appServerScript(silence string) string {
 	opts := []string{
 		// the server runs its own PulseAudio; the client decides whether
 		// sound and the microphone flow
@@ -304,6 +318,7 @@ chmod 700 "$d"
 IFS= read -r secret
 (umask 077; printf %s "$secret" > "$d/xpra.secret")
 cat > "$d/xpra-start.py"
+printf %s ` + shellQuote(silence) + ` > "$d/audio-silence"
 # services D-Bus starts for apps, such as the desktop portal's GTK
 # backend, need the display; without it the portal hung until a timeout
 # and GTK apps waited a minute for it before showing a window. Apps play
@@ -320,8 +335,8 @@ if ! systemctl --user is-active --quiet ` + appServerUnit + `; then
   systemctl --user reset-failed ` + appServerUnit + ` >/dev/null 2>&1 || true
   rm -f "$d/xpra.sock"
   # the server starts that PulseAudio, which refuses to while PULSE_SERVER
-  # names a server
-  systemd-run --user --quiet --collect --unit=` + appServerUnit + ` -E DISPLAY=` + appDisplay + ` -- env -u PULSE_SERVER python3 "$d/xpra-start.py" start ` + appDisplay + ` --bind="$d/xpra.sock,auth=file:filename=$d/xpra.secret" ` + strings.Join(opts, " ") + `
+  # names a server; its audio processes start through xpra-start.py too
+  systemd-run --user --quiet --collect --unit=` + appServerUnit + ` -E DISPLAY=` + appDisplay + ` -E "XPRA_AUDIO_COMMAND=python3 $d/xpra-start.py" -- env -u PULSE_SERVER python3 "$d/xpra-start.py" start ` + appDisplay + ` --bind="$d/xpra.sock,auth=file:filename=$d/xpra.secret" ` + strings.Join(opts, " ") + `
 fi
 for i in $(seq 1 60); do
   if [ -S "$d/xpra.sock" ] && DISPLAY=` + appDisplay + ` xset q >/dev/null 2>&1; then exit 0; fi
@@ -643,7 +658,7 @@ func (s *Server) appVM(w http.ResponseWriter, name string) (*vm.Spec, bool) {
 }
 
 // ensureAppServer installs and starts the VM's Xpra server.
-func (s *Server) ensureAppServer(ctx context.Context, spec *vm.Spec) error {
+func (s *Server) ensureAppServer(ctx context.Context, spec *vm.Spec, st *appState) error {
 	if out, err := s.sshRunCtx(ctx, spec, appInstallScript(false)); err != nil {
 		return fmt.Errorf("install xpra in %s: %v%s", spec.Name, err, indentOutput(out))
 	}
@@ -651,7 +666,7 @@ func (s *Server) ensureAppServer(ctx context.Context, spec *vm.Spec) error {
 	if err != nil {
 		return err
 	}
-	if out, err := s.sshRunInputCtx(ctx, spec, appServerScript(), appServerInput(secret)); err != nil {
+	if out, err := s.sshRunInputCtx(ctx, spec, appServerScript(st.audioSilence()), appServerInput(secret)); err != nil {
 		return fmt.Errorf("start xpra server in %s: %v%s", spec.Name, err, indentOutput(out))
 	}
 	return nil
@@ -788,7 +803,7 @@ func (s *Server) handleAppStart(w http.ResponseWriter, r *http.Request) {
 		kind = "url"
 	}
 	rec := appRecord{ID: id, Kind: kind, Argv: req.Argv, URL: req.URL, Kiosk: req.Kiosk, Created: time.Now().UTC()}
-	if err := s.ensureAppServer(ctx, spec); err != nil {
+	if err := s.ensureAppServer(ctx, spec, st); err != nil {
 		writeErr(w, 500, err)
 		return
 	}
@@ -1095,7 +1110,7 @@ func (s *Server) handleAppAttach(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
-	if err := s.ensureAppServer(ctx, spec); err != nil {
+	if err := s.ensureAppServer(ctx, spec, st); err != nil {
 		writeErr(w, 500, err)
 		return
 	}
@@ -1128,10 +1143,11 @@ func (s *Server) handleAppConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Clipboard  string `json:"clipboard"`
-		Drop       *bool  `json:"drop"`
-		Audio      string `json:"audio"`
-		RenderCPUs *int   `json:"render_cpus"`
+		Clipboard    string `json:"clipboard"`
+		Drop         *bool  `json:"drop"`
+		Audio        string `json:"audio"`
+		AudioSilence string `json:"audio_silence"`
+		RenderCPUs   *int   `json:"render_cpus"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, fmt.Errorf("bad request: %v", err))
@@ -1166,6 +1182,16 @@ func (s *Server) handleAppConfig(w http.ResponseWriter, r *http.Request) {
 		st.Audio = req.Audio
 		if st.Audio == "out" {
 			st.Audio = ""
+		}
+	}
+	if req.AudioSilence != "" {
+		if !slices.Contains(audioSilenceModes, req.AudioSilence) {
+			writeErr(w, 400, fmt.Errorf("--audio-silence must be one of %s", strings.Join(audioSilenceModes, ", ")))
+			return
+		}
+		st.AudioSilence = req.AudioSilence
+		if st.AudioSilence == "skip" {
+			st.AudioSilence = ""
 		}
 	}
 	if req.RenderCPUs != nil {

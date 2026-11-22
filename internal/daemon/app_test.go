@@ -79,7 +79,7 @@ func TestAppScriptsParse(t *testing.T) {
 	}
 	scripts := map[string]string{
 		"install": appInstallScript(true),
-		"server":  appServerScript(),
+		"server":  appServerScript("skip"),
 		"cmd":     appLaunchScript(&appRecord{ID: "gedit", Kind: "cmd", Argv: []string{"gedit", "it's a file; rm -rf ~", "$(id)"}}, "", "", 0),
 		"cwd":     appLaunchScript(&appRecord{ID: "gedit", Kind: "cmd", Argv: []string{"gedit"}}, "/workspace/web/it's a dir; $(id)", "/workspace/web", 0),
 		"pin":     appLaunchScript(&appRecord{ID: "claude", Kind: "cmd", Argv: []string{"claude-desktop"}}, "", "", 2),
@@ -95,6 +95,14 @@ func TestAppScriptsParse(t *testing.T) {
 		if len(s) > 6000 {
 			t.Errorf("%s script is %d bytes; send the long part on stdin", name, len(s))
 		}
+	}
+	// the audio processes read the setting when a client attaches, and
+	// start through xpra-start.py
+	if send := appServerScript("send"); !strings.Contains(send, `printf %s 'send' > "$d/audio-silence"`) || !strings.Contains(send, `-E "XPRA_AUDIO_COMMAND=python3 $d/xpra-start.py"`) {
+		t.Errorf("server script does not pass the audio silence setting:\n%s", send)
+	}
+	if !strings.Contains(scripts["server"], `python3 "$d/xpra-start.py" start `+appDisplay+` --bind=`) {
+		t.Errorf("server script does not start the server on %s:\n%s", appDisplay, scripts["server"])
 	}
 	if !strings.Contains(scripts["cmd"], `'it'"'"'s a file; rm -rf ~'`) || !strings.Contains(scripts["cmd"], `'$(id)'`) {
 		t.Errorf("cmd arguments not quoted:\n%s", scripts["cmd"])
@@ -320,20 +328,27 @@ func TestAppConfigRoutes(t *testing.T) {
 		}
 		return strings.TrimSpace(rr.Body.String())
 	}
-	if got, want := call("GET", ""), `{"audio":"out","clipboard":"off","drop":false,"render_cpus":2}`; got != want {
+	if got, want := call("GET", ""), `{"audio":"out","audio_silence":"skip","clipboard":"off","drop":false,"render_cpus":2}`; got != want {
 		t.Errorf("a vm without app state: %s, want %s", got, want)
 	}
-	set := call("PUT", `{"clipboard":"both","drop":true,"audio":"off","render_cpus":0}`)
-	if got := call("GET", ""); got != set || got != `{"audio":"off","clipboard":"both","drop":true,"render_cpus":0}` {
+	set := call("PUT", `{"clipboard":"both","drop":true,"audio":"off","audio_silence":"send","render_cpus":0}`)
+	if got := call("GET", ""); got != set || got != `{"audio":"off","audio_silence":"send","clipboard":"both","drop":true,"render_cpus":0}` {
 		t.Errorf("after the change: GET %s, PUT answered %s", got, set)
 	}
-	if got := call("PUT", `{"render_cpus":4}`); got != `{"audio":"off","clipboard":"both","drop":true,"render_cpus":4}` {
+	if got := call("PUT", `{"render_cpus":4}`); got != `{"audio":"off","audio_silence":"send","clipboard":"both","drop":true,"render_cpus":4}` {
 		t.Errorf("render cpus 4: %s", got)
 	}
-	for _, body := range []string{`{"render_cpus":-1}`, `{"render_cpus":257}`} {
+	// the default is not stored
+	if got := call("PUT", `{"audio_silence":"skip"}`); !strings.Contains(got, `"audio_silence":"skip"`) {
+		t.Errorf("audio silence skip: %s", got)
+	}
+	if st, err := s.loadAppState("dev1"); err != nil || st.AudioSilence != "" {
+		t.Errorf("stored audio silence %q, %v; want the default left out", st.AudioSilence, err)
+	}
+	for body, flag := range map[string]string{`{"render_cpus":-1}`: "--render-cpus", `{"render_cpus":257}`: "--render-cpus", `{"audio_silence":"loud"}`: "--audio-silence"} {
 		rr := httptest.NewRecorder()
 		s.handler().ServeHTTP(rr, httptest.NewRequest("PUT", "/v1/vms/dev1/apps/config", strings.NewReader(body)))
-		if rr.Code != 400 || !strings.Contains(rr.Body.String(), "--render-cpus") {
+		if rr.Code != 400 || !strings.Contains(rr.Body.String(), flag) {
 			t.Errorf("%s: %d %s", body, rr.Code, rr.Body.String())
 		}
 	}

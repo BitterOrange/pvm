@@ -23,6 +23,7 @@ const exit = select([], "");
 const clipboard = select([], "");
 const drop = select([], "");
 const audio = select([], "");
+const audioSilence = select([], "");
 // the renderer slider ends at the vCPUs chosen above; untouched it keeps
 // pvm's default
 const renderCpus = renderControl("create:render");
@@ -221,7 +222,13 @@ function request(): CreateRequest {
     disk_gb: Number(disk.value),
     exit: exit.value,
     // the default needs no step of its own
-    app_config: { clipboard: clipboard.value, drop: drop.value, audio: audio.value, render_cpus: !renderCpus.touched() || renderCpus.value() === newAppConfig.render_cpus ? "" : renderCpus.value() },
+    app_config: {
+      clipboard: clipboard.value,
+      drop: drop.value,
+      audio: audio.value,
+      audio_silence: audioSilence.value,
+      render_cpus: !renderCpus.touched() || renderCpus.value() === newAppConfig.render_cpus ? "" : renderCpus.value(),
+    },
     apps: programBoxes.filter((b) => b.checked).map((b) => b.value),
   };
 }
@@ -281,13 +288,14 @@ function label(): void {
         h("div", { class: "form-grid form-grid--2" }, field(t.appConfig.clipboard, clipboard), field(t.appConfig.drop, drop)),
         // its choices are sentences, which half a row would cut
         field(t.appConfig.audio, audio),
+        field(t.appConfig.audioSilence, audioSilence, t.appConfig.audioSilenceHint),
         renderCpus.field,
       ),
       group(c.programs, programs),
     ),
   );
   const config = appConfigChoices();
-  for (const [el, name] of [[clipboard, "clipboard"], [drop, "drop"], [audio, "audio"]] as const) {
+  for (const [el, name] of [[clipboard, "clipboard"], [drop, "drop"], [audio, "audio"], [audioSilence, "audio_silence"]] as const) {
     // the first layout starts from what a new VM has
     const value = el.options.length === 0 ? newAppConfig[name] : el.value;
     el.replaceChildren(...config[name].map((o) => h("option", { value: o.value }, o.label)));

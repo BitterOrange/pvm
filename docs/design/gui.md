@@ -123,8 +123,9 @@ Actions on a VM:
 - **App** asks for a command line or a URL and runs `pvm app <vm> -- <cmd...>` or `pvm app <vm> <url>`. The command is split at spaces and a double quote is refused: it would not group words, and no quoting of it makes the copied command safe in both cmd.exe and PowerShell. It lists the VM's installed catalog apps: a window app is a one-click entry that runs `pvm app <vm> -- <start>`. A terminal app is listed but cannot be clicked, as it works on the folder it starts in; the list says to start it from a workspace's terminal, which opens in the matching folder.
 - **Files** runs `pvm app <vm> -- thunar`.
 - **Resize** changes vCPUs, memory and disk with `pvm resize <vm> [<disk-gb>] [--cpus N] [--mem MB]`, passing only what differs. The disk field refuses a smaller size. `pvm resize` takes a stopped VM, so for a running one the dialog says so and the task is `pvm stop <vm>`, the resize, then the start with its wait; a failed step leaves the rest as commands to copy.
-- **App settings** sets clipboard, drop, audio and the renderer CPUs with `pvm app config <vm> ...`. The dialog first reads what the VM has (`GET /v1/vms/{name}/apps/config`) and shows it, and passes only the flags that were changed. The settings are per VM; there is none for the host.
+- **App settings** sets clipboard, drop, audio, silence and the renderer CPUs with `pvm app config <vm> ...`. The dialog first reads what the VM has (`GET /v1/vms/{name}/apps/config`) and shows it, and passes only the flags that were changed. The settings are per VM; there is none for the host.
   - Renderer CPUs is `--render-cpus N`: how many vCPUs the renderers of Chromium and Electron apps may use, 2 by default and 0 for no limit. It is a slider from 1 to the VM's vCPUs with a number to type beside it. The end of the slider, or 0, is no limit, as a limit at or above the VM's vCPUs limits nothing; the scale under the slider names that end. An untouched control sends nothing, so a stored number above the VM's vCPUs is kept. The dialog says that it applies to apps started afterwards.
+  - Silence is `--audio-silence skip|send`: whether the VM sends sound while it plays nothing. Not sending it, the default, saves CPU in the VM. The dialog says that it applies the next time the windows are attached.
 - **Install programs** runs `pvm app install <vm> <id>...` with the catalog programs picked, on a VM that is ready.
 - **Set as default** runs `pvm default-vm <vm>`.
 
@@ -138,7 +139,7 @@ The form asks for:
 - CPUs, memory and disk, with defaults from `config.yaml`. Create always passes them, as a running daemon keeps the defaults it started with.
   - CPUs are a slider, here and in Resize. It ends at the host's logical processors (`runtime.NumCPU` in the app, at most the daemon's 64), or at what the VM already has when that is more. At the host's count it warns that the host can freeze and offers one less.
 - The exit: `direct`, or one of the exits.
-- Clipboard, drop and audio, starting from what a new VM has: off, off and sound out. Create always passes them too, so the VM gets what the form showed.
+- Clipboard, drop, audio and silence, starting from what a new VM has: off, off, sound out and silence not sent (`--audio-silence skip`). Create always passes them too, so the VM gets what the form showed.
 - Renderer CPUs, starting from pvm's default of 2. Its slider ends at the vCPUs chosen above and follows them: a number the user set is held to the new end and comes back when the vCPUs grow again, and no limit stays no limit. Create passes `--render-cpus` only when the user set a number other than the default, as the default needs no flag.
 - The programs to preinstall, from the app catalog.
 
@@ -146,7 +147,7 @@ Create runs these steps in order, each with its output in the progress panel:
 
 1. `pvm create --name <vm> ... --no-start`. When the golden image is missing, its fetch and bake output shows here; it takes minutes the first time.
 2. `pvm route <vm> --via <exit>`, also when the exit is the default one: the VM keeps the exit that was chosen when the default changes later.
-3. `pvm app config <vm> --clipboard ... --drop ... --audio ...`, with `--render-cpus N` when it is not the default.
+3. `pvm app config <vm> --clipboard ... --drop ... --audio ... --audio-silence ...`, with `--render-cpus N` when it is not the default.
 4. `pvm start <vm> --no-wait`; the app then follows the stages until the VM is ready.
 5. `pvm app install <vm> <id>...`, when programs were picked.
 

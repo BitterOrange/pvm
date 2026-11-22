@@ -43,7 +43,7 @@ Rejected:
 - ssh -X to an X server on Windows: weak isolation, text-only clipboard.
 - SPICE, Selkies, KasmVNC, Guacamole and noVNC: whole desktops in a browser tab.
 
-The guest runs Xpra 6.5 from xpra.org's APT repository, pinned to the 6.5 line, with the signing key fingerprint checked. Golden images include it, and `pvm app` installs it on first use in older VMs. The host needs the matching Windows client, 6.5.x. The Windows installers include it in `%LOCALAPPDATA%\pvm\xpra`: the release job downloads a pinned zip from xpra.org (`script/windows/fetch-xpra-client.sh`), checks its SHA256 and its signature by the same key as the APT repository, and ships it with its GPL text, a note on where to get the source, and three Python files of pvm added (see [Input methods](#input-methods) and [Sound](#sound)).
+The guest runs Xpra 6.5 from xpra.org's APT repository, pinned to the 6.5 line, with the signing key fingerprint checked. Golden images include it, and `pvm app` installs it on first use in older VMs. The host needs the matching Windows client, 6.5.x. The Windows installers include it in `%LOCALAPPDATA%\pvm\xpra`: the release job downloads a pinned zip from xpra.org (`script/windows/fetch-xpra-client.sh`), checks its SHA256 and its signature by the same key as the APT repository, and ships it with its GPL text, a note on where to get the source, and four Python files of pvm added (see [Input methods](#input-methods) and [Sound](#sound)).
 
 ### Session model
 
@@ -103,6 +103,26 @@ The server runs its own PulseAudio (`xpra-audio-server`) with `--speaker=on --mi
 Both directions use Opus. Measured on a Windows host: a 440 Hz tone played in the VM with `paplay` was recorded from the host's output device through WASAPI loopback at about 440 Hz, and a recording in the VM picked up the host's default microphone. Before `PULSE_SERVER` was set, apps played into the session's null sink and the host heard nothing.
 
 The Windows client follows a change of the default output device, such as plugging in headphones, by restarting the speaker. It did nothing for the input device: the microphone kept recording the device that was the default when forwarding started. After a headset was unplugged, that device was gone and the VM heard nothing until the client was attached again. After one was plugged in, the VM kept hearing the built-in microphone. The Windows installers add `xpra/client/subsystem/audio.py` to the client. While the microphone is on, it watches for device changes with the client's own `IMMNotificationClient` monitor. One second after a change, as one plug sends several notifications, it restarts the microphone if the default input device is another one or its capture has stopped. A change of output device alone does not restart it. Measured: after unplugging a headset and plugging it in again, the client logged a microphone restart one second after each speaker restart, and the VM heard the headset's microphone again.
+
+Sound cost the most while nothing played. Every audio buffer crossed several processes in the VM: the capture process, its pipe to the server, the server's protocol threads, the guest agent and the virtio channel, and the microphone came the other way. Each step woke a thread on another vCPU, and with `kernel-irqchip=off` each such wakeup is an IPI that exits to QEMU. Measured in a 10-vCPU VM with Claude Desktop open, nothing playing and `--audio both`: about 1,700 function-call IPIs and 1,700 timer interrupts a second, and QEMU used about one host core. With the client's sound off, the IPIs fell to 50 and the timer interrupts to 270 a second, and QEMU used about 20% of a core. ftrace put nearly all of those wakeups in the audio processes, PulseAudio, Xpra's protocol threads and the agent.
+
+Three changes followed. The measurements were taken on one server, attaching the client again between them.
+
+- **Fewer, larger packets.** Xpra starts its audio processes through `xpra_start.py` too (`XPRA_AUDIO_COMMAND`). There the capture reads PulseAudio every 50 ms instead of about 10, and encodes 60 ms Opus frames instead of 20. The client the installers ship does the same for the microphone (`xpra/audio/src.py`). The VM's sound reaches the host about 80 ms later, and the microphone reaches the VM about 40 ms later.
+- **Silence.** `pvm app config <vm> --audio-silence skip|send`, `skip` by default: while the VM plays nothing, nothing is sent.
+  - GStreamer's `cutter` passes nothing after half a second below -70 dB, which only digital silence reaches, and when a sound starts it passes the 0.1 s before it too.
+  - It does not pass on the formats the encoder takes, so the source picked 44.1 kHz, which Opus refuses, and the capture stopped. A caps filter before it fixes 48 kHz.
+  - Xpra's own handling of cutter's messages is turned off: they reach it late, and it would cut the start of a sound.
+  - pvm writes the setting to `$XDG_RUNTIME_DIR/pvm/audio-silence` whenever a client attaches, and the audio processes read it when they start. So it applies to clients attached afterwards.
+- **Results, in function-call IPIs a second and QEMU's share of one host core:**
+  - 20 ms frames: 1,500 to 1,900 IPIs, 85% to 135%.
+  - 60 ms frames: about 1,280 IPIs, 63% to 94%.
+  - Silence skipped as well: about 1,250 IPIs, 75% to 77%.
+  - 50 ms reads as well: about 800 IPIs, 54% to 69%.
+  - Once frames were 60 ms, skipping silence saved little more. Most of the remaining wakeups came from the microphone. The client patch cut its packets by about 30%; `opus+ogg` already groups packets into pages.
+- **Listening.** A sequence of short tones with 0.8 s gaps, which close the gate, sounded the same as with 0.15 s gaps, which keep it open. No start was cut.
+
+Not done: pinning PulseAudio and the audio processes to one vCPU turns most of their wakeups into local ones; in one test it halved the IPIs of the old setup.
 
 ## Startup
 

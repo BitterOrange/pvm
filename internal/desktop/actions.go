@@ -238,6 +238,9 @@ type AppConfig struct {
 	Clipboard string `json:"clipboard"` // off, to-guest, to-host or both
 	Drop      string `json:"drop"`      // on or off
 	Audio     string `json:"audio"`     // off, out or both
+	// AudioSilence is skip or send: whether the VM sends sound while it
+	// plays nothing.
+	AudioSilence string `json:"audio_silence"`
 	// RenderCPUs is the vCPUs a Chromium app's renderers may use, as a
 	// number; 0 is no limit.
 	RenderCPUs string `json:"render_cpus"`
@@ -255,6 +258,7 @@ func (c AppConfig) args() ([]string, error) {
 		{"--clipboard", c.Clipboard, []string{"off", "to-guest", "to-host", "both"}},
 		{"--drop", c.Drop, []string{"on", "off"}},
 		{"--audio", c.Audio, []string{"off", "out", "both"}},
+		{"--audio-silence", c.AudioSilence, []string{"skip", "send"}},
 	} {
 		if f.value == "" {
 			continue

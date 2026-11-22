@@ -46,6 +46,10 @@ export const en = {
     both: "Both ways",
     audioOut: "VM sound on the host speakers",
     audioBoth: "Speakers and host microphone",
+    audioSilence: "Silence",
+    silenceSkip: "Not sent, which saves CPU",
+    silenceSend: "Sent like any sound",
+    audioSilenceHint: "While the VM plays nothing, no sound goes to the host and the VM stays idle. Applies the next time the windows are attached.",
     renderCpus: "Renderer CPUs",
     renderCpusHint:
       "Limits only the renderers of Chromium and Electron programs, such as Claude Desktop; their other work still uses every vCPU. The end of the slider, or 0, is no limit. Applies to programs started afterwards.",

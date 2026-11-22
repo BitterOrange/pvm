@@ -1,5 +1,5 @@
 # pvm starts the Xpra server through this file, which changes three
-# things in it before it runs.
+# things in it before it runs, and one in its audio processes.
 #
 # Text a host input method commits, such as Chinese from Microsoft Pinyin,
 # arrives as a key press with keycode 0, the character as its string and
@@ -26,6 +26,14 @@
 # A maximum window size larger than any screen is dropped: the Windows
 # client applied it and removed the window's maximize button, and GTK
 # gives Firefox 16366x16337.
+#
+# Xpra starts its audio processes through this file too
+# (XPRA_AUDIO_COMMAND), and the sound the VM plays is read every 50 ms and
+# goes out in 60 ms Opus frames instead of 20 ms: every read and every
+# packet wakes processes on other vCPUs, and under WHPX each wakeup exits
+# to QEMU. Unless the VM's audio_silence is send, nothing goes out while
+# the VM plays nothing.
+import os
 import queue
 import re
 import subprocess
@@ -38,6 +46,53 @@ from xpra.platform import init, set_default_name
 
 set_default_name("Xpra")
 init()
+
+
+def _audio_capture():
+    from xpra.audio import gstreamer_util, src
+    gstreamer_util.ENCODER_DEFAULT_OPTIONS.setdefault("opusenc", {})["frame-size"] = 60
+    # read from PulseAudio every 50 ms instead of about 10: PulseAudio and
+    # the capture threads woke a vCPU at every read, silence or not
+    src.BUFFER_TIME, src.LATENCY_TIME = 200, 50
+    try:
+        # written by pvm whenever a client attaches
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "audio-silence")) as f:
+            if f.read().strip() == "send":
+                return
+    except OSError:
+        pass
+    AudioSource = src.AudioSource
+    setup = AudioSource.setup_pipeline_and_bus
+    parse = AudioSource.do_parse_element_message
+
+    def setup_pipeline_and_bus(self, elements):
+        at = [n for n, e in enumerate(elements) if e.split(" ", 1)[0] in ("volume", "opusenc")]
+        if at and any(e.startswith("opusenc") for e in elements):
+            # cutter passes nothing after half a second below -70 dB, which
+            # only digital silence is, and the 0.1 s before a sound with it.
+            # It does not pass on what the encoder takes, so the source
+            # would pick 44.1 kHz, which Opus refuses.
+            elements = elements[:at[0]] + [
+                'capsfilter caps="audio/x-raw,format=S16LE,rate=48000"',
+                "cutter threshold-dB=-70 run-length=500000000 pre-length=100000000",
+            ] + elements[at[0]:]
+        return setup(self, elements)
+
+    def do_parse_element_message(self, message, name, props=None):
+        # Xpra drops the buffers around cutter's messages, which reach it
+        # late: the start of a sound would be cut
+        if name != "cutter":
+            parse(self, message, name, props)
+
+    AudioSource.setup_pipeline_and_bus = setup_pipeline_and_bus
+    AudioSource.do_parse_element_message = do_parse_element_message
+
+
+if "_audio_record" in sys.argv[1:4]:
+    _audio_capture()
+if "_audio_record" in sys.argv[1:4] or "_audio_play" in sys.argv[1:4]:
+    from xpra.scripts.main import main
+    sys.exit(main("xpra", ["xpra"] + sys.argv[1:]))
 
 from xpra.os_util import gi_import  # noqa: E402
 from xpra.x11.models import size_hints_util  # noqa: E402

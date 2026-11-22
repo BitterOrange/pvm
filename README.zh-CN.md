@@ -158,7 +158,7 @@ pvm app catalog
 pvm app install dev1 claude-code codex claude-desktop
 ```
 
-剪贴板和拖放默认关闭，需按虚拟机单独开启。使用 `--clipboard to-guest` 或 `both` 时，宿主机内容只在该虚拟机的窗口切到前台、或窗口在前台时复制，才会进入虚拟机；被密码管理器标记为排除的内容永远不会发送。文本、图片，以及在 Windows 宿主机上的文件和文件夹，都可以双向复制粘贴。用宿主机输入法（比如微软拼音）输入的中文，或表情面板里的 emoji，也能正常输入到应用里；在 Windows 宿主机上，输入法的候选框会出现在应用的文本光标处。声音从宿主机扬声器播放；`--audio both` 还会把宿主机的麦克风借给虚拟机。Chromium 和 Electron 应用（比如 Claude Desktop）的渲染进程只用 2 个 vCPU，在虚拟机里比用满全部 vCPU 绘制得更快；`--render-cpus N` 修改这个数，对之后启动的应用生效，`0` 表示不限制。详见 [docs/design/app.md](docs/design/app.md)。
+剪贴板和拖放默认关闭，需按虚拟机单独开启。使用 `--clipboard to-guest` 或 `both` 时，宿主机内容只在该虚拟机的窗口切到前台、或窗口在前台时复制，才会进入虚拟机；被密码管理器标记为排除的内容永远不会发送。文本、图片，以及在 Windows 宿主机上的文件和文件夹，都可以双向复制粘贴。用宿主机输入法（比如微软拼音）输入的中文，或表情面板里的 emoji，也能正常输入到应用里；在 Windows 宿主机上，输入法的候选框会出现在应用的文本光标处。声音从宿主机扬声器播放；`--audio both` 还会把宿主机的麦克风借给虚拟机。虚拟机没有播放声音时不发送音频，可以节省虚拟机的 CPU；`--audio-silence send` 会照常发送。Chromium 和 Electron 应用（比如 Claude Desktop）的渲染进程只用 2 个 vCPU，在虚拟机里比用满全部 vCPU 绘制得更快；`--render-cpus N` 修改这个数，对之后启动的应用生效，`0` 表示不限制。详见 [docs/design/app.md](docs/design/app.md)。
 
 `pvm app catalog` 列出 pvm 可以代为安装的应用：Claude Code、Codex CLI、Claude Desktop 和 Firefox，均为厂商官方的 Linux 版本。`pvm app install [<vm>] <id>...` 在虚拟机内以 root 运行该应用的内置安装脚本；下载只发生在虚拟机里，经它的出口出网，不经过宿主机。`pvm app ls` 还会显示每台虚拟机里已有的目录应用，包括随镜像预装或手动安装的。
 

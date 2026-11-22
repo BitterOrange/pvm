@@ -339,6 +339,7 @@ func TestActionArgv(t *testing.T) {
 		}), []string{"app config dev1 --clipboard both --drop on --audio off"}, ""},
 		{"app settings, one", task(func() (Task, error) { return app.ConfigureApps("dev1", AppConfig{Drop: "off"}) }), []string{"app config dev1 --drop off"}, ""},
 		{"app settings, render cpus", task(func() (Task, error) { return app.ConfigureApps("dev1", AppConfig{RenderCPUs: "0"}) }), []string{"app config dev1 --render-cpus 0"}, ""},
+		{"app settings, audio silence", task(func() (Task, error) { return app.ConfigureApps("dev1", AppConfig{AudioSilence: "send"}) }), []string{"app config dev1 --audio-silence send"}, ""},
 		{"install", task(func() (Task, error) { return app.InstallApps("dev1", []string{"codex", "claude-desktop"}) }), []string{"app install dev1 codex claude-desktop"}, ""},
 		{"default vm", task(func() (Task, error) { return app.SetDefaultVM("dev1") }), []string{"default-vm dev1"}, ""},
 		{"clear default vm", task(app.ClearDefaultVM), []string{"default-vm --clear"}, ""},
@@ -537,6 +538,7 @@ func TestRefusals(t *testing.T) {
 		"create disk":         with(func(r *CreateRequest) { r.DiskGB = -1 }),
 		"create exit":         with(func(r *CreateRequest) { r.Exit = "other" }),
 		"create audio":        with(func(r *CreateRequest) { r.AppConfig.Audio = "loud" }),
+		"create silence":      with(func(r *CreateRequest) { r.AppConfig.AudioSilence = "quiet" }),
 		"create app":          with(func(r *CreateRequest) { r.Apps = []string{"nope"} }),
 	} {
 		if err := do(); err == nil {
@@ -575,8 +577,8 @@ func TestResizeAStoppedVM(t *testing.T) {
 func TestAppSettings(t *testing.T) {
 	f := newFixture(t)
 	for body, want := range map[string]AppConfig{
-		`{"clipboard":"off","drop":false,"audio":"out","render_cpus":2}`: {Clipboard: "off", Drop: "off", Audio: "out", RenderCPUs: "2"},
-		`{"clipboard":"both","drop":true,"audio":"off","render_cpus":0}`: {Clipboard: "both", Drop: "on", Audio: "off", RenderCPUs: "0"},
+		`{"clipboard":"off","drop":false,"audio":"out","audio_silence":"skip","render_cpus":2}`: {Clipboard: "off", Drop: "off", Audio: "out", AudioSilence: "skip", RenderCPUs: "2"},
+		`{"clipboard":"both","drop":true,"audio":"off","audio_silence":"send","render_cpus":0}`: {Clipboard: "both", Drop: "on", Audio: "off", AudioSilence: "send", RenderCPUs: "0"},
 	} {
 		f.daemon.set("/v1/vms/dev1/apps/config", body)
 		got, err := f.app.AppSettings("dev1")
