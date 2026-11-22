@@ -20,8 +20,10 @@
 # the key unused. Chromium, and so Electron apps such as Claude Desktop,
 # tells ibus where its cursor is only while it handles a key, and the keys
 # of a host input method never reach it: after a left click, a text field
-# taking the focus and committed text, the server presses a key no
-# keyboard has, which the engine eats, so that the app tells it.
+# taking the focus and committed text, the server presses Control, which
+# the engine eats, so that the app tells it. Any key but Control, Alt or
+# Meta counts in Chromium as keyboard use, after which an element a page
+# focuses itself on a click gets its focus ring.
 #
 # A maximum window size larger than any screen is dropped: the Windows
 # client applied it and removed the window's maximize button, and GTK
@@ -152,8 +154,8 @@ _focused = None
 _caret = None
 _caret_sent = {}
 IBus = None
-# keys no keyboard has, the first the keymap holds is pressed
-_NUDGE_KEYS = ("XF86Launch9", "XF86Launch8", "F15", "F14", "F13")
+# the first the keymap holds is pressed
+_NUDGE_KEYS = ("Control_R", "Control_L")
 # the app takes a frame or more to move its cursor, longer when busy or
 # when it switches views
 _NUDGE_DELAYS = (50, 300, 1000)
