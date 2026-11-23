@@ -26,6 +26,7 @@ Shipped:
 - [x] vCPUs and memory in `pvm resize` and PVM Desktop, stopping the daemon from PVM Desktop, installed apps found in the VM, Firefox in the catalog (v1.3.2-1.3.3)
 - [x] Renderer CPUs for Chromium apps; input method text through ibus, with candidates at the text cursor on Windows; less CPU for sound, silence not sent, and a microphone that follows headsets (v1.3.4)
 - [x] The keyring as a setting, `off` or `host` (encrypted, unlocked from the host); window scale per VM; app settings that apply to open windows at once; no focus ring after clicks in Electron apps (v1.3.5)
+- [x] PVM Desktop: terminal, app and file manager on a stopped VM ask to start it first and open once it is ready; app settings in groups, all in view (v1.3.6)
 
 Planned:
 
