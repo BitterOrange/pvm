@@ -91,6 +91,28 @@ func (a *App) StopDaemon(confirmed bool) (Task, error) {
 	return a.runTask("Stop the daemon", one("daemon", "stop")), nil
 }
 
+// upSteps bring a VM up before an action that needs it running, once
+// the user agreed to start it: a stopped VM is started and a starting one
+// waited for, so the action runs when it is ready. A VM that is up or
+// failed needs none, as `pvm app` takes a failed VM too.
+func (a *App) upSteps(name string, start bool) ([]step, error) {
+	if !start {
+		return nil, nil
+	}
+	in, err := a.findVM(name)
+	if err != nil {
+		return nil, err
+	}
+	switch state, _, _ := vmState(in); state {
+	case stateStopped:
+		return []step{startStep(name)}, nil
+	case stateStarting:
+		// only waits; a person would wait with `pvm start`
+		return []step{{display: commandLine("start", name), wait: name}}, nil
+	}
+	return nil, nil
+}
+
 func (a *App) StartVM(name string) (Task, error) {
 	if err := a.native(); err != nil {
 		return Task{}, err
@@ -169,8 +191,10 @@ func appTarget(target string) ([]string, error) {
 	return append([]string{"--"}, fields...), nil
 }
 
-// RunApp shows a command or a URL of the VM as a host window.
-func (a *App) RunApp(name, target string) (Task, error) {
+// RunApp shows a command or a URL of the VM as a host window. start is
+// that the user agreed to start the VM first if it is stopped; without it
+// `pvm app` refuses a stopped VM.
+func (a *App) RunApp(name, target string, start bool) (Task, error) {
 	if err := a.native(); err != nil {
 		return Task{}, err
 	}
@@ -181,13 +205,22 @@ func (a *App) RunApp(name, target string) (Task, error) {
 	if err != nil {
 		return Task{}, err
 	}
-	return a.runTask("Open an app in "+name, one(append([]string{"app", name}, args...)...)), nil
+	return a.runApp("Open an app in "+name, name, start, append([]string{"app", name}, args...))
+}
+
+// runApp runs `pvm app`, after the steps that bring the VM up.
+func (a *App) runApp(title, name string, start bool, argv []string) (Task, error) {
+	steps, err := a.upSteps(name, start)
+	if err != nil {
+		return Task{}, err
+	}
+	return a.runTask(title, append(steps, one(argv...)...)), nil
 }
 
 // RunCatalogApp starts a catalog program with a window through `pvm app`.
 // A terminal program is refused: it works on the folder it starts in, and
 // this would start it in ~; a workspace terminal starts in the right one.
-func (a *App) RunCatalogApp(name, id string) (Task, error) {
+func (a *App) RunCatalogApp(name, id string, start bool) (Task, error) {
 	if err := a.native(); err != nil {
 		return Task{}, err
 	}
@@ -201,8 +234,7 @@ func (a *App) RunCatalogApp(name, id string) (Task, error) {
 	if !entry.Window {
 		return Task{}, fmt.Errorf("%s runs in a terminal, in the folder it should work on: open a workspace's terminal and run %s there", entry.Name, entry.Start)
 	}
-	start := strings.Fields(entry.Start)
-	return a.runTask("Open "+entry.Name+" in "+name, one(append([]string{"app", name, "--"}, start...)...)), nil
+	return a.runApp("Open "+entry.Name+" in "+name, name, start, append([]string{"app", name, "--"}, strings.Fields(entry.Start)...))
 }
 
 func (a *App) catalogApp(id string) (CatalogApp, error) {
@@ -222,14 +254,14 @@ func (a *App) catalogApp(id string) (CatalogApp, error) {
 }
 
 // OpenFiles shows the VM's file manager.
-func (a *App) OpenFiles(name string) (Task, error) {
+func (a *App) OpenFiles(name string, start bool) (Task, error) {
 	if err := a.native(); err != nil {
 		return Task{}, err
 	}
 	if err := checkVMNot(name, "app", appWords); err != nil {
 		return Task{}, err
 	}
-	return a.runTask("Open files in "+name, one("app", name, "--", "thunar")), nil
+	return a.runApp("Open files in "+name, name, start, []string{"app", name, "--", "thunar"})
 }
 
 // AppConfig is what `pvm app config` sets. An empty field is left as it
@@ -698,21 +730,21 @@ func (a *App) OpenWorkspaceTerminal(id string) error {
 }
 
 // RunWorkspaceApp runs `pvm app` from the host folder, so a command
-// starts in the matching guest folder.
-func (a *App) RunWorkspaceApp(id, target string) (Task, error) {
-	return a.workspaceApp(id, "Open an app in workspace "+id, func(*workspace.Workspace) ([]string, error) {
+// starts in the matching guest folder. start is as for RunApp.
+func (a *App) RunWorkspaceApp(id, target string, start bool) (Task, error) {
+	return a.workspaceApp(id, "Open an app in workspace "+id, start, func(*workspace.Workspace) ([]string, error) {
 		return appTarget(target)
 	})
 }
 
 // OpenWorkspaceFiles shows the file manager in the guest folder.
-func (a *App) OpenWorkspaceFiles(id string) (Task, error) {
-	return a.workspaceApp(id, "Open files in workspace "+id, func(ws *workspace.Workspace) ([]string, error) {
+func (a *App) OpenWorkspaceFiles(id string, start bool) (Task, error) {
+	return a.workspaceApp(id, "Open files in workspace "+id, start, func(ws *workspace.Workspace) ([]string, error) {
 		return []string{"--", "thunar", ws.GuestPath}, nil
 	})
 }
 
-func (a *App) workspaceApp(id, title string, target func(*workspace.Workspace) ([]string, error)) (Task, error) {
+func (a *App) workspaceApp(id, title string, start bool, target func(*workspace.Workspace) ([]string, error)) (Task, error) {
 	if err := a.native(); err != nil {
 		return Task{}, err
 	}
@@ -728,8 +760,14 @@ func (a *App) workspaceApp(id, title string, target func(*workspace.Workspace) (
 	if err != nil {
 		return Task{}, err
 	}
+	// a workspace without a VM leaves the choice to `pvm app`, so there is
+	// none to start
+	steps, err := a.upSteps(ws.VM, start && ws.VM != "")
+	if err != nil {
+		return Task{}, err
+	}
 	argv := append(append([]string{"app"}, vmArg...), args...)
-	return a.runTask(title, []step{{argv: argv, dir: ws.HostPath, display: commandLine(argv...)}}), nil
+	return a.runTask(title, append(steps, step{argv: argv, dir: ws.HostPath, display: commandLine(argv...)})), nil
 }
 
 // SyncWorkspace runs `pvm workspace push` or `pull`.

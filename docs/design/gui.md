@@ -288,6 +288,7 @@ These land in the CLI and daemon before the app. Each is its own commit, with te
 - **Backend unit tests** run against a fake daemon (`httptest`) and a fake `pvm` runner. They cover:
   - Mapping stages to states.
   - The argv for every action, and the name checks.
+  - The steps before `pvm app` when the user agreed to start the VM: a start with its wait for a stopped VM, only the wait for a starting one, none for one that is up, and the action left to run by hand when the start does not get the VM ready.
   - Create stopping at the failed step.
   - That tokens and keys never reach the frontend.
 - **Frontend.** `TestFrontendAPI` and `TestFrontendTypes` keep `api.ts` equal to the backend's methods and types. The screens have no automated tests; they were looked at in Chromium with the made-up backend of `npm run dev`, not in WebView2.
@@ -295,7 +296,7 @@ These land in the CLI and daemon before the app. Each is its own commit, with te
   - The resolve order with `default_vm`, including a deleted default VM.
   - The app working directory.
   - Catalog parsing and the install stream.
-- **Run on a native WHPX host** against a real daemon, from a local build in WebView2: the VM list with start and its stages, the file manager, an app and a URL as host windows, the Activity panel, the Create, Exits, Workspaces and Settings screens with live data, the dark theme and the card view, and, before the redesign, creating a VM and deleting it. A VM's terminal opening in the home directory is covered by unit tests only.
+- **Run on a native WHPX host** against a real daemon, from a local build in WebView2: the VM list with start and its stages, the file manager, an app and a URL as host windows, the Activity panel, the Create, Exits, Workspaces and Settings screens with live data, the dark theme and the card view, and, before the redesign, creating a VM and deleting it. Terminal, App and Files on a stopped VM, and Files of a workspace whose VM was stopped: the question, the start with its stages in the row, and the terminal in the home directory or the window once the VM was ready, with no question in the console; Files on a VM started from the CLI, which only waited; and a stop during the wait, which left the file manager unopened, with its command to copy.
 - **End to end from the installers**, not done yet:
   - Install with both installers and open the app from the Start menu.
   - Create a VM with Claude Code preinstalled, from an empty data folder (golden bake) and again with the golden present.

@@ -328,12 +328,12 @@ func TestActionArgv(t *testing.T) {
 		{"start", task(func() (Task, error) { return app.StartVM("dev1") }), []string{"start dev1 --no-wait"}, ""},
 		{"stop", task(func() (Task, error) { return app.StopVM("dev1") }), []string{"stop dev1"}, ""},
 		{"delete", task(func() (Task, error) { return app.DeleteVM("dev1", true) }), []string{"rm dev1 -y"}, ""},
-		{"app command", task(func() (Task, error) { return app.RunApp("dev1", " gedit  notes.txt ") }), []string{"app dev1 -- gedit notes.txt"}, ""},
-		{"app flag-like command", task(func() (Task, error) { return app.RunApp("dev1", "--no-attach") }), []string{"app dev1 -- --no-attach"}, ""},
-		{"app url", task(func() (Task, error) { return app.RunApp("dev1", "https://example.com/a?b=c") }), []string{"app dev1 https://example.com/a?b=c"}, ""},
-		{"app not a url", task(func() (Task, error) { return app.RunApp("dev1", "ftp://example.com") }), []string{"app dev1 -- ftp://example.com"}, ""},
-		{"catalog window app", task(func() (Task, error) { return app.RunCatalogApp("dev1", "claude-desktop") }), []string{"app dev1 -- claude-desktop"}, ""},
-		{"files", task(func() (Task, error) { return app.OpenFiles("dev1") }), []string{"app dev1 -- thunar"}, ""},
+		{"app command", task(func() (Task, error) { return app.RunApp("dev1", " gedit  notes.txt ", false) }), []string{"app dev1 -- gedit notes.txt"}, ""},
+		{"app flag-like command", task(func() (Task, error) { return app.RunApp("dev1", "--no-attach", false) }), []string{"app dev1 -- --no-attach"}, ""},
+		{"app url", task(func() (Task, error) { return app.RunApp("dev1", "https://example.com/a?b=c", false) }), []string{"app dev1 https://example.com/a?b=c"}, ""},
+		{"app not a url", task(func() (Task, error) { return app.RunApp("dev1", "ftp://example.com", false) }), []string{"app dev1 -- ftp://example.com"}, ""},
+		{"catalog window app", task(func() (Task, error) { return app.RunCatalogApp("dev1", "claude-desktop", false) }), []string{"app dev1 -- claude-desktop"}, ""},
+		{"files", task(func() (Task, error) { return app.OpenFiles("dev1", false) }), []string{"app dev1 -- thunar"}, ""},
 		{"app settings", task(func() (Task, error) {
 			return app.ConfigureApps("dev1", AppConfig{Clipboard: "both", Drop: "on", Audio: "off"})
 		}), []string{"app config dev1 --clipboard both --drop on --audio off"}, ""},
@@ -355,9 +355,9 @@ func TestActionArgv(t *testing.T) {
 		{"test exit", task(func() (Task, error) { return app.TestExit("my-exit", false) }), []string{"exit test my-exit"}, ""},
 		{"speed test", task(func() (Task, error) { return app.TestExit("my-exit", true) }), []string{"exit test my-exit --speed"}, ""},
 		{"remove exit", task(func() (Task, error) { return app.RemoveExit("my-exit", true) }), []string{"exit rm my-exit"}, ""},
-		{"workspace app", task(func() (Task, error) { return app.RunWorkspaceApp("web", "code .") }), []string{"app dev1 -- code ."}, host},
-		{"workspace app, no vm", task(func() (Task, error) { return app.RunWorkspaceApp("loose", "code .") }), []string{"app -- code ."}, loose},
-		{"workspace files", task(func() (Task, error) { return app.OpenWorkspaceFiles("web") }), []string{"app dev1 -- thunar /workspace/web"}, host},
+		{"workspace app", task(func() (Task, error) { return app.RunWorkspaceApp("web", "code .", false) }), []string{"app dev1 -- code ."}, host},
+		{"workspace app, no vm", task(func() (Task, error) { return app.RunWorkspaceApp("loose", "code .", false) }), []string{"app -- code ."}, loose},
+		{"workspace files", task(func() (Task, error) { return app.OpenWorkspaceFiles("web", false) }), []string{"app dev1 -- thunar /workspace/web"}, host},
 		{"push", task(func() (Task, error) { return app.SyncWorkspace("web", "push") }), []string{"workspace push web"}, ""},
 		{"pull", task(func() (Task, error) { return app.SyncWorkspace("web", "pull") }), []string{"workspace pull web"}, ""},
 		{"create workspace", task(func() (Task, error) {
@@ -454,15 +454,15 @@ func TestRefusals(t *testing.T) {
 		"delete unconfirmed":      task(func() (Task, error) { return app.DeleteVM("dev1", false) }),
 		"daemon stop unconfirmed": task(func() (Task, error) { return app.StopDaemon(false) }),
 		"terminal":                func() error { return app.OpenTerminal("-T") },
-		"app vm":                  task(func() (Task, error) { return app.RunApp("dev 1", "gedit") }),
-		"app subcommand vm":       task(func() (Task, error) { return app.RunApp("stop", "gedit") }),
-		"app empty":               task(func() (Task, error) { return app.RunApp("dev1", "  ") }),
-		"app control":             task(func() (Task, error) { return app.RunApp("dev1", "gedit\x00") }),
-		"app quote":               task(func() (Task, error) { return app.RunApp("dev1", `sh -c "a&b"`) }),
-		"catalog id":              task(func() (Task, error) { return app.RunCatalogApp("dev1", "--all") }),
-		"catalog unknown":         task(func() (Task, error) { return app.RunCatalogApp("dev1", "nope") }),
-		"catalog terminal app":    task(func() (Task, error) { return app.RunCatalogApp("dev1", "codex") }),
-		"files vm":                task(func() (Task, error) { return app.OpenFiles("ls") }),
+		"app vm":                  task(func() (Task, error) { return app.RunApp("dev 1", "gedit", false) }),
+		"app subcommand vm":       task(func() (Task, error) { return app.RunApp("stop", "gedit", false) }),
+		"app empty":               task(func() (Task, error) { return app.RunApp("dev1", "  ", false) }),
+		"app control":             task(func() (Task, error) { return app.RunApp("dev1", "gedit\x00", false) }),
+		"app quote":               task(func() (Task, error) { return app.RunApp("dev1", `sh -c "a&b"`, false) }),
+		"catalog id":              task(func() (Task, error) { return app.RunCatalogApp("dev1", "--all", false) }),
+		"catalog unknown":         task(func() (Task, error) { return app.RunCatalogApp("dev1", "nope", false) }),
+		"catalog terminal app":    task(func() (Task, error) { return app.RunCatalogApp("dev1", "codex", false) }),
+		"files vm":                task(func() (Task, error) { return app.OpenFiles("ls", false) }),
 		"config value":            task(func() (Task, error) { return app.ConfigureApps("dev1", AppConfig{Clipboard: "--drop"}) }),
 		"config drop":             task(func() (Task, error) { return app.ConfigureApps("dev1", AppConfig{Drop: "true"}) }),
 		"config nothing":          task(func() (Task, error) { return app.ConfigureApps("dev1", AppConfig{}) }),
@@ -512,8 +512,8 @@ func TestRefusals(t *testing.T) {
 		"remove exit name":    task(func() (Task, error) { return app.RemoveExit("-x", true) }),
 		"workspace folder":    func() error { return app.OpenWorkspaceFolder("../web") },
 		"workspace missing":   func() error { return app.OpenWorkspaceTerminal("none") },
-		"workspace app vm":    task(func() (Task, error) { return app.RunWorkspaceApp("odd", "gedit") }),
-		"workspace app empty": task(func() (Task, error) { return app.RunWorkspaceApp("web", "") }),
+		"workspace app vm":    task(func() (Task, error) { return app.RunWorkspaceApp("odd", "gedit", false) }),
+		"workspace app empty": task(func() (Task, error) { return app.RunWorkspaceApp("web", "", false) }),
 		"sync id":             task(func() (Task, error) { return app.SyncWorkspace("--prefer", "push") }),
 		"sync direction":      task(func() (Task, error) { return app.SyncWorkspace("web", "rm") }),
 		"new workspace id": task(func() (Task, error) {
@@ -876,6 +876,98 @@ func TestStartFollowsTheStages(t *testing.T) {
 		if tk.Steps[0].Command != "pvm start dev1" {
 			t.Errorf("%s: step %q", tc.name, tk.Steps[0].Command)
 		}
+	}
+}
+
+// TestActionsStartTheVMFirst runs the actions that take start on a VM in
+// each state: a stopped one is started and followed first, a starting one
+// only waited for, and one that is up runs the action alone.
+func TestActionsStartTheVMFirst(t *testing.T) {
+	const (
+		stopped  = `[{"spec":{"name":"dev1","role":"user"}}]`
+		starting = `[{"spec":{"name":"dev1","role":"user"},"running":true,"stage":{"stage":"ssh"}}]`
+	)
+	for _, ac := range []struct {
+		name string
+		do   func(a *App, start bool) (Task, error)
+		argv string
+	}{
+		{"app", func(a *App, start bool) (Task, error) { return a.RunApp("dev1", "gedit", start) }, "app dev1 -- gedit"},
+		{"catalog app", func(a *App, start bool) (Task, error) { return a.RunCatalogApp("dev1", "claude-desktop", start) }, "app dev1 -- claude-desktop"},
+		{"files", func(a *App, start bool) (Task, error) { return a.OpenFiles("dev1", start) }, "app dev1 -- thunar"},
+		{"workspace app", func(a *App, start bool) (Task, error) { return a.RunWorkspaceApp("web", "gedit", start) }, "app dev1 -- gedit"},
+		{"workspace files", func(a *App, start bool) (Task, error) { return a.OpenWorkspaceFiles("web", start) }, "app dev1 -- thunar /workspace/web"},
+	} {
+		for _, tc := range []struct {
+			state string
+			vms   string
+			start bool
+			ran   []string
+			steps []string
+		}{
+			{"stopped", stopped, true, []string{"start dev1 --no-wait", ac.argv}, []string{"pvm start dev1", "pvm " + ac.argv}},
+			{"starting", starting, true, []string{ac.argv}, []string{"pvm start dev1", "pvm " + ac.argv}},
+			{"ready", userVMs, true, []string{ac.argv}, []string{"pvm " + ac.argv}},
+			{"stopped, no start", stopped, false, []string{ac.argv}, []string{"pvm " + ac.argv}},
+		} {
+			f := newFixture(t)
+			f.saveWorkspace(t, "web", "dev1")
+			f.daemon.set("/v1/vms", tc.vms)
+			// a started VM comes up; a starting one is ready after the
+			// read that decided the steps
+			f.runner.during = func(c command, _ func(string)) {
+				if c.argv[0] == "start" {
+					f.daemon.set("/v1/vms", userVMs)
+				}
+			}
+			reads := 0
+			f.daemon.onGet = func(path string) {
+				if path != "/v1/vms" {
+					return
+				}
+				if reads++; tc.vms == starting && reads > 1 {
+					f.daemon.set("/v1/vms", userVMs)
+				}
+			}
+			tk, err := ac.do(f.app, tc.start)
+			if err != nil || !tk.OK {
+				t.Errorf("%s, %s: %+v, %v", ac.name, tc.state, tk, err)
+				continue
+			}
+			if got := f.runner.argvs(); !slices.Equal(got, tc.ran) {
+				t.Errorf("%s, %s: ran %q, want %q", ac.name, tc.state, got, tc.ran)
+			}
+			var steps []string
+			for _, s := range tk.Steps {
+				steps = append(steps, s.Command)
+			}
+			if !slices.Equal(steps, tc.steps) {
+				t.Errorf("%s, %s: steps %q, want %q", ac.name, tc.state, steps, tc.steps)
+			}
+		}
+	}
+
+	// a start that does not get the VM ready leaves the action to run by hand
+	f := newFixture(t)
+	f.daemon.set("/v1/vms", stopped)
+	tk, err := f.app.OpenFiles("dev1", true)
+	if err != nil || tk.OK || tk.Error != "dev1 stopped before it was ready; see `pvm logs dev1`" {
+		t.Fatalf("failed start: %+v, %v", tk, err)
+	}
+	if got := f.runner.argvs(); !slices.Equal(got, []string{"start dev1 --no-wait"}) {
+		t.Fatalf("failed start ran %q", got)
+	}
+	if !slices.Equal(tk.Remaining, []string{"pvm app dev1 -- thunar"}) {
+		t.Fatalf("remaining %q", tk.Remaining)
+	}
+
+	// a VM that is not there is refused before anything runs
+	f.runner.calls = nil
+	if _, err := f.app.RunApp("dev9", "gedit", true); err == nil || err.Error() != "vm dev9 does not exist" {
+		t.Fatalf("missing vm: %v", err)
+	}
+	if len(f.runner.calls) != 0 {
+		t.Fatalf("missing vm ran %q", f.runner.argvs())
 	}
 }
 
