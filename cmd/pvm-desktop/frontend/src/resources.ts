@@ -78,8 +78,11 @@ export function cpuControl(key: string): CpuControl {
 }
 
 export interface RenderControl {
-  // field is the labelled slider and number with their hint.
-  field: HTMLElement;
+  // id is the slider's: a label is for it, and its hint and its error
+  // are id-hint and id-error.
+  id: string;
+  // body is the slider and the number, with the scale under them.
+  body: HTMLElement;
   // num is the typed number, which carries the field's error.
   num: HTMLInputElement;
   // value is the setting as --render-cpus takes it, 0 for no limit:
@@ -115,8 +118,6 @@ export function renderControl(key: string): RenderControl {
   const first = h("span", null, "1");
   const end = h("span");
   const scale = h("div", { class: "slider-scale", "aria-hidden": "true" }, first, end);
-  const name = h("label", { class: "label", for: id });
-  const hint = h("p", { class: "hint", id: id + "-hint" });
   const at = () => Number(range.value);
   const unlimited = () => at() >= most;
 
@@ -137,8 +138,6 @@ export function renderControl(key: string): RenderControl {
   }
 
   function label(): void {
-    name.textContent = t.appConfig.renderCpus;
-    hint.textContent = t.appConfig.renderCpusHint;
     num.setAttribute("aria-label", t.appConfig.renderCpusNumber);
     draw();
   }
@@ -169,14 +168,8 @@ export function renderControl(key: string): RenderControl {
   });
   label();
   return {
-    field: h(
-      "div",
-      { class: "field" },
-      name,
-      h("div", { class: "slider slider--typed" }, range, h("span", { class: "slider-typed" }, num, of), scale),
-      h("p", { class: "field-error", role: "alert", id: id + "-error" }),
-      hint,
-    ),
+    id,
+    body: h("div", { class: "slider slider--typed" }, range, h("span", { class: "slider-typed" }, num, of), scale),
     num,
     // the setting, not the thumb: a number held to fewer vCPUs is kept
     value: () => String(want),
@@ -198,8 +191,10 @@ export function renderControl(key: string): RenderControl {
 export const scales = ["1", "1.25", "1.5", "2"];
 
 export interface ScaleControl {
-  // field is the labelled slider with its hint.
-  field: HTMLElement;
+  // id is the slider's: a label is for it, and its hint is id-hint.
+  id: string;
+  // body is the slider with the names of its stops under it.
+  body: HTMLElement;
   // value is the scale as --scale takes it.
   value(): string;
   // load shows a setting read from the daemon or the default.
@@ -227,8 +222,6 @@ export function scaleControl(key: string): ScaleControl {
     return stop;
   });
   const steps = h("div", { class: "slider-steps", "aria-hidden": "true" }, ...stops);
-  const name = h("label", { class: "label", for: id });
-  const hint = h("p", { class: "hint", id: id + "-hint" });
   const value = () => scales[Number(range.value)];
 
   function draw(): void {
@@ -241,28 +234,17 @@ export function scaleControl(key: string): ScaleControl {
     range.setAttribute("aria-valuetext", value() === "1" ? t.appConfig.scaleNone : t.appConfig.scaleOf(value()));
   }
 
-  function label(): void {
-    name.textContent = t.appConfig.scale;
-    hint.textContent = t.appConfig.scaleHint;
-    draw();
-  }
-
   range.addEventListener("input", draw);
-  label();
+  draw();
   return {
-    field: h(
-      "div",
-      { class: "field" },
-      name,
-      h("div", { class: "slider slider--typed" }, range, h("span", { class: "slider-value slider-value--steps", "aria-hidden": "true" }, now), steps),
-      hint,
-    ),
+    id,
+    body: h("div", { class: "slider slider--typed" }, range, h("span", { class: "slider-value slider-value--steps", "aria-hidden": "true" }, now), steps),
     value,
     load(v) {
       // a scale this version does not know shows as none
       range.value = String(Math.max(0, scales.indexOf(v)));
       draw();
     },
-    label,
+    label: draw,
   };
 }

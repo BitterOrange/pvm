@@ -146,6 +146,8 @@ export interface TaskOutput {
 
 // A read, or an action the backend refused, rejects with an error
 // string. An action that ran resolves with its Task; ok says how it went.
+// start, where a method takes it, says the user agreed to start a stopped
+// VM: the task starts it, or waits for one that is starting, before `pvm app`.
 export interface Backend {
   State(): Promise<State>;
   VMs(): Promise<VM[]>;
@@ -165,9 +167,9 @@ export interface Backend {
   StartVM(name: string): Promise<Task>;
   StopVM(name: string): Promise<Task>;
   DeleteVM(name: string, confirmed: boolean): Promise<Task>;
-  RunApp(name: string, target: string): Promise<Task>;
-  RunCatalogApp(name: string, id: string): Promise<Task>;
-  OpenFiles(name: string): Promise<Task>;
+  RunApp(name: string, target: string, start: boolean): Promise<Task>;
+  RunCatalogApp(name: string, id: string, start: boolean): Promise<Task>;
+  OpenFiles(name: string, start: boolean): Promise<Task>;
   ConfigureApps(name: string, config: AppConfig): Promise<Task>;
   InstallApps(name: string, ids: string[]): Promise<Task>;
   SetDefaultVM(name: string): Promise<Task>;
@@ -180,8 +182,8 @@ export interface Backend {
   AddWarpExit(name: string): Promise<Task>;
   TestExit(name: string, speed: boolean): Promise<Task>;
   RemoveExit(name: string, confirmed: boolean): Promise<Task>;
-  RunWorkspaceApp(id: string, target: string): Promise<Task>;
-  OpenWorkspaceFiles(id: string): Promise<Task>;
+  RunWorkspaceApp(id: string, target: string, start: boolean): Promise<Task>;
+  OpenWorkspaceFiles(id: string, start: boolean): Promise<Task>;
   SyncWorkspace(id: string, direction: "push" | "pull"): Promise<Task>;
   CreateWorkspace(request: CreateWorkspaceRequest): Promise<Task>;
   RemoveWorkspace(id: string, confirmed: boolean): Promise<Task>;

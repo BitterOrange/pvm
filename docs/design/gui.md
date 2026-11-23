@@ -122,8 +122,20 @@ Actions on a VM:
 - **Terminal** runs `pvm ssh <vm>` in Windows Terminal (`wt.exe`) when installed, else in a new console window.
 - **App** asks for a command line or a URL and runs `pvm app <vm> -- <cmd...>` or `pvm app <vm> <url>`. The command is split at spaces and a double quote is refused: it would not group words, and no quoting of it makes the copied command safe in both cmd.exe and PowerShell. It lists the VM's installed catalog apps: a window app is a one-click entry that runs `pvm app <vm> -- <start>`. A terminal app is listed but cannot be clicked, as it works on the folder it starts in; the list says to start it from a workspace's terminal, which opens in the matching folder.
 - **Files** runs `pvm app <vm> -- thunar`.
+- **Terminal, App and Files on a VM that is not running** stay on; the VM starts first, once the user agrees:
+  - Stopped: Terminal and Files ask first, naming the VM, saying that it starts first and what opens once it is ready. App asks nothing more than its own dialog, which then says that the VM starts first and whose button is "Start and open": typing the command, or a click on an installed program, is the consent. The list of installed programs is the one the daemon keeps, so a stopped VM has it too.
+  - Starting: nothing is asked. App and Files wait for the VM; the terminal opens at once, as before.
+  - Ready or failed: as before.
+  - While another action works on the VM, App and Files are off, and the terminal only stays on during a start's wait, as before.
+  - App and Files pass `start` to the backend (`RunApp`, `RunCatalogApp`, `OpenFiles` and the workspace ones): the task then runs `pvm start <vm>` with its stages for a stopped VM, or only waits for a starting one, before `pvm app`; without `start` a stopped VM fails as before. The terminal is put together in the app: `StartVM`, then `OpenTerminal` once that ended with the VM ready, so `pvm ssh` asks nothing in the console.
+  - Either way the start is followed like Start: the row shows the stages, and Stop or Delete stay on and end the wait. A failed start, or a stop meanwhile, leaves the action undone, with the usual notice and its command left to copy.
 - **Resize** changes vCPUs, memory and disk with `pvm resize <vm> [<disk-gb>] [--cpus N] [--mem MB]`, passing only what differs. The disk field refuses a smaller size. `pvm resize` takes a stopped VM, so for a running one the dialog says so and the task is `pvm stop <vm>`, the resize, then the start with its wait; a failed step leaves the rest as commands to copy.
 - **App settings** sets clipboard, drop, audio, silence, the window scale, the renderer CPUs and the keyring with `pvm app config <vm> ...`. The dialog first reads what the VM has (`GET /v1/vms/{name}/apps/config`) and shows it, and passes only the flags that were changed. The settings are per VM; there is none for the host.
+  - The settings stand in three groups: Interaction (clipboard, drop files, audio), Performance (window scale, renderer CPUs, silence) and Security (keyring). The dialog is wide and puts them in two columns, so all seven show at once down to the smallest window of 800 by 540.
+  - Each setting says when a change applies: now, for programs started afterwards (renderer CPUs), or at the next start of an app (keyring). The long explanations open with a button beside the name.
+  - A changed setting is marked and says what it was and what the change does, and Apply counts the changes. A switch away from the kept keyring password warns as it is chosen that apps sign in again once the VM restarts.
+  - A dialog whose body does not fit, as when explanations are open, fades at the edge where there is more.
+  - The groups and their order are a list in `vms.ts`, so a new setting takes a place there.
   - Renderer CPUs is `--render-cpus N`: how many vCPUs the renderers of Chromium and Electron apps may use, 2 by default and 0 for no limit. It is a slider from 1 to the VM's vCPUs with a number to type beside it. The end of the slider, or 0, is no limit, as a limit at or above the VM's vCPUs limits nothing; the scale under the slider names that end. An untouched control sends nothing, so a stored number above the VM's vCPUs is kept. The dialog says that it applies to apps started afterwards.
   - Silence is `--audio-silence skip|send`: whether the VM sends sound while it plays nothing. Not sending it, the default, saves CPU in the VM. The dialog says that open windows are attached again to apply it.
   - Keyring is `--keyring off|host`: left to the VM, or encrypted with a password kept on the host and unlocked before apps start. The dialog says that apps such as Claude Desktop stay signed in with the kept password, and must sign in again after a switch away from it once the VM restarts.
@@ -141,6 +153,7 @@ The form asks for:
 - CPUs, memory and disk, with defaults from `config.yaml`. Create always passes them, as a running daemon keeps the defaults it started with.
   - CPUs are a slider, here and in Resize. It ends at the host's logical processors (`runtime.NumCPU` in the app, at most the daemon's 64), or at what the VM already has when that is more. At the host's count it warns that the host can freeze and offers one less.
 - The exit: `direct`, or one of the exits.
+- The App settings, in the groups and with the controls of the App settings dialog, without what applies when or what changed, as a new VM has nothing to compare with.
 - Clipboard, drop, audio and silence, starting from what a new VM has: off, off, sound out and silence not sent (`--audio-silence skip`). Create always passes them too, so the VM gets what the form showed.
 - Window scale, starting from 1. Create passes `--scale` only when it is another one.
 - Keyring, starting from `off`. Create always passes it, so a new VM is never moved to `host` by itself.
@@ -179,6 +192,7 @@ The workspace list shows the id, VM, mode, host folder and last transfer.
 - **Terminal** runs `pvm ssh` with the host folder as its working directory, so it starts in the matching guest folder.
 - **App** runs `pvm app` from the host folder; this needs the app working directory change below.
 - **Files** runs `pvm app <vm> -- thunar <guest folder>`.
+- Terminal, App and Files follow the rules of the VMs screen by the state of the workspace's VM: on a stopped one they start it first, once the user agrees, and the questions name the guest folder. The row shows the VM's state beside its name when it is not ready. Open folder does not need the VM.
 - **Sync** runs `pvm workspace push` and `pull` for `sync` and `copy` workspaces. A conflict fails with the CLI's own hint; the app offers no conflict options.
 - **Create** asks for the id, VM, mode, host folder (a folder picker) and read-only, then runs `pvm workspace create`, with `-y` once the user has confirmed. The command has no transport flag.
 - **Remove** asks first, then runs `pvm workspace rm <id> -y`. It removes the record only; the files are not touched.

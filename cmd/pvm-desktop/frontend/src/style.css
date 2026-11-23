@@ -1050,6 +1050,23 @@ textarea {
   gap: 8px;
   min-width: 0;
 }
+/* The state of a workspace's VM, when it is not ready */
+.ws-vm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-3);
+}
+.ws-vm[data-state="starting"] {
+  color: var(--info-text);
+}
+.ws-vm[data-state="failed"] {
+  color: var(--danger-text);
+}
+.glyph.glyph--sm {
+  width: 8px;
+  height: 8px;
+}
 .path-key {
   width: 32px;
   flex: none;
@@ -1595,6 +1612,98 @@ textarea {
   gap: 4px 8px;
 }
 
+/* App settings: groups of settings, each with its name, a button for the
+   long explanation, and when a change applies. The dialog stands them in
+   two columns; the create form stacks them. */
+.opt-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(270px, 100%), 1fr));
+  gap: 18px 28px;
+  align-items: start;
+}
+.opt-col {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+.opt-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.opt-group-title {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  font: 600 var(--fs-micro) / 1.2 var(--font-ui);
+  letter-spacing: var(--caps-tracking);
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.opt {
+  gap: 5px;
+}
+.opt-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 20px;
+}
+.opt-head .label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* a changed setting is marked before its name */
+.opt[data-changed] .opt-head .label::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.icon-btn.opt-help {
+  width: 22px;
+  height: 22px;
+  margin: -2px 0;
+  color: var(--text-3);
+}
+.opt-when {
+  margin-left: auto;
+  padding-left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.opt-when .ico {
+  width: 12px;
+  height: 12px;
+}
+.opt-when[data-changed] {
+  color: var(--accent-text);
+}
+.opt-hint {
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  background: var(--bg-sunken);
+}
+.opt-note:empty {
+  display: none;
+}
+.opt-note p {
+  font-size: var(--fs-small);
+  line-height: 1.45;
+  color: var(--accent-text);
+}
+.fieldset .opt-group + .opt-group {
+  margin-top: 6px;
+}
+
 /* 11. Feedback ----------------------------------------------------------- */
 .callout {
   display: flex;
@@ -1712,6 +1821,9 @@ textarea {
 .dialog--narrow {
   width: min(440px, calc(100vw - 48px));
 }
+.dialog--wide {
+  width: min(720px, calc(100vw - 48px));
+}
 .dialog-form {
   display: flex;
   flex-direction: column;
@@ -1741,6 +1853,8 @@ textarea {
   gap: 14px;
   padding: 14px 24px 4px;
   overflow: auto;
+  /* what scrolls into view stops clear of the fades at the edges */
+  scroll-padding: 24px 0 32px;
 }
 .dialog-foot {
   display: flex;
@@ -1748,6 +1862,37 @@ textarea {
   flex-wrap: wrap;
   gap: 8px;
   padding: 18px 24px 22px;
+  transition: box-shadow var(--dur-1) var(--ease-out);
+}
+/* More than fits: dom.ts marks what lies past the edges of the scrolling
+   body, which then fades there, and a line sets the buttons apart. */
+.dialog-body[data-below] {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 32px), transparent);
+}
+.dialog-body[data-above] {
+  mask-image: linear-gradient(to top, #000 calc(100% - 24px), transparent);
+}
+.dialog-body[data-above][data-below] {
+  mask-image: linear-gradient(to bottom, transparent, #000 24px, #000 calc(100% - 32px), transparent);
+}
+.dialog-body[data-below] + .dialog-foot {
+  box-shadow: 0 -1px 0 var(--border);
+}
+/* A short window, down to the smallest of 540px, gives a dialog more of
+   its height. */
+@media (max-height: 640px) {
+  .dialog {
+    max-height: calc(100vh - 24px);
+  }
+  .dialog-form {
+    max-height: calc(100vh - 26px);
+  }
+  .dialog-head {
+    padding-top: 18px;
+  }
+  .dialog-foot {
+    padding: 14px 24px 18px;
+  }
 }
 .dialog-list {
   display: flex;

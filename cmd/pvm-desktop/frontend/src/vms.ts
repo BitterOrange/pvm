@@ -1,4 +1,4 @@
-import { backend, errorText, type AppConfig, type CatalogApp, type VM } from "./api";
+import { backend, errorText, type AppConfig, type CatalogApp, type Task, type VM } from "./api";
 import {
   badge,
   banner,
@@ -23,10 +23,11 @@ import {
   tag,
   type Child,
 } from "./dom";
+import type { Part } from "./en";
 import { t } from "./i18n";
 import { icon, type IconName } from "./icons";
 import * as prefs from "./prefs";
-import { cpuControl, limits, number, outside, renderControl, scaleControl } from "./resources";
+import { cpuControl, limits, number, outside, renderControl, scaleControl, type RenderControl } from "./resources";
 import { act, actStart, busy, data, memory, nav, onlyFollowed } from "./store";
 
 const stateKind = { stopped: "", starting: "info", ready: "ok", failed: "danger" } as const;
@@ -85,7 +86,7 @@ export function appConfigChoices(): Record<ChoiceSetting, { value: string; label
   const c = t.appConfig;
   return {
     clipboard: [{ value: "off", label: c.off }, { value: "to-guest", label: c.toGuest }, { value: "to-host", label: c.toHost }, { value: "both", label: c.both }],
-    drop: [{ value: "off", label: c.off }, { value: "on", label: c.on }],
+    drop: [{ value: "off", label: c.off }, { value: "on", label: c.dropOn }],
     audio: [{ value: "out", label: c.audioOut }, { value: "both", label: c.audioBoth }, { value: "off", label: c.off }],
     audio_silence: [{ value: "skip", label: c.silenceSkip }, { value: "send", label: c.silenceSend }],
     keyring: [{ value: "off", label: c.keyringOff }, { value: "host", label: c.keyringHost }],
@@ -96,6 +97,254 @@ export function appConfigChoices(): Record<ChoiceSetting, { value: string; label
 // `pvm app config` has not been run for.
 export const newAppConfig: AppConfig = { clipboard: "off", drop: "off", audio: "out", audio_silence: "skip", render_cpus: "2", scale: "1", keyring: "off" };
 
+type Setting = keyof AppConfig;
+
+// When a change takes effect: at once, for programs started afterwards,
+// or at the next start of an app.
+type When = "now" | "later" | "next";
+
+// The groups of App settings in the order they show, each with its
+// settings in order. A new setting of `pvm app config` takes a place here,
+// a line in settingSpecs, a control in appSettingsForm and its words in
+// en.ts and zh.ts.
+export type SettingGroup = "interaction" | "performance" | "security";
+const settingGroups: [SettingGroup, Setting[]][] = [
+  ["interaction", ["clipboard", "drop", "audio"]],
+  ["performance", ["scale", "render_cpus", "audio_silence"]],
+  ["security", ["keyring"]],
+];
+
+interface SettingSpec {
+  name: () => string;
+  // hint is the long explanation, shown on request.
+  hint?: () => string;
+  when: When;
+  // effect says, once the setting is changed, when that applies.
+  effect: () => string;
+}
+
+const settingSpecs: Record<Setting, SettingSpec> = {
+  clipboard: { name: () => t.appConfig.clipboard, when: "now", effect: () => t.appConfig.effectReconnect },
+  drop: { name: () => t.appConfig.drop, when: "now", effect: () => t.appConfig.effectNow },
+  audio: { name: () => t.appConfig.audio, when: "now", effect: () => t.appConfig.effectNow },
+  scale: { name: () => t.appConfig.scale, hint: () => t.appConfig.scaleHint, when: "now", effect: () => t.appConfig.effectScale },
+  render_cpus: { name: () => t.appConfig.renderCpus, hint: () => t.appConfig.renderCpusHint, when: "later", effect: () => t.appConfig.effectLater },
+  audio_silence: { name: () => t.appConfig.audioSilence, hint: () => t.appConfig.audioSilenceHint, when: "now", effect: () => t.appConfig.effectReconnect },
+  keyring: { name: () => t.appConfig.keyring, hint: () => t.appConfig.keyringHint, when: "next", effect: () => t.appConfig.effectNext },
+};
+
+const whenText = (when: When): string => (when === "now" ? t.appConfig.whenNow : when === "later" ? t.appConfig.whenLater : t.appConfig.whenNext);
+const groupName = (group: SettingGroup): string => t.appConfig[group];
+
+// A control of one setting, whatever its kind.
+interface SettingControl {
+  // id is the control a label is for.
+  id: string;
+  // body is the control as it shows, with what is drawn with it.
+  body: HTMLElement;
+  value(): string;
+  load(value: string): void;
+  // sends is what Apply sends against what the VM has: "" leaves it.
+  sends(now: string): string;
+  // said puts a value into the words the control shows it with.
+  said(value: string): string;
+  label(): void;
+}
+
+function choiceControl(prefix: string, key: ChoiceSetting): SettingControl {
+  const el = select([], newAppConfig[key], { id: prefix + "-" + key, "data-key": prefix + ":" + key });
+  const choices = () => appConfigChoices()[key];
+  // the words change with the language; the choice stays
+  const fill = () => {
+    const chosen = el.options.length === 0 ? newAppConfig[key] : el.value;
+    el.replaceChildren(...choices().map((o) => h("option", { value: o.value }, o.label)));
+    el.value = chosen;
+  };
+  fill();
+  return {
+    id: el.id,
+    body: el,
+    value: () => el.value,
+    load: (value) => (el.value = value),
+    sends: (now) => (el.value === now ? "" : el.value),
+    said: (value) => choices().find((o) => o.value === value)?.label ?? value,
+    label: fill,
+  };
+}
+
+export interface AppSettingsForm {
+  // groups are laid out by the caller, as its room allows.
+  groups: Record<SettingGroup, HTMLElement>;
+  // render is the renderer slider, which ends at the VM's vCPUs.
+  render: RenderControl;
+  // load shows the settings of a VM, or the ones a new VM gets.
+  load(config: AppConfig): void;
+  value(key: Setting): string;
+  // change holds what differs from what was loaded, "" for the rest: the
+  // renderer CPUs only once moved or typed, as a stored number above the
+  // VM's vCPUs shows at the end of the slider.
+  change(): AppConfig;
+  changes(): number;
+  label(): void;
+  focus(): void;
+}
+
+// appSettingsForm builds the App settings in their groups. live is for a
+// VM that exists: each setting says when a change applies, and a changed
+// one what it was and what the change does.
+export function appSettingsForm(prefix: string, opts: { live: boolean; vm?: string }): AppSettingsForm {
+  const render = renderControl(prefix + ":render");
+  const scale = scaleControl(prefix + ":scale");
+  const controls: Record<Setting, SettingControl> = {
+    clipboard: choiceControl(prefix, "clipboard"),
+    drop: choiceControl(prefix, "drop"),
+    audio: choiceControl(prefix, "audio"),
+    audio_silence: choiceControl(prefix, "audio_silence"),
+    keyring: choiceControl(prefix, "keyring"),
+    render_cpus: {
+      id: render.id,
+      body: render.body,
+      value: render.value,
+      load: render.load,
+      sends: (now) => (!render.touched() || render.bad() || render.value() === now ? "" : render.value()),
+      said: (value) => (Number(value) === 0 ? t.appConfig.renderCpusAll : t.appConfig.renderCpusCount(Number(value))),
+      label: render.label,
+    },
+    scale: {
+      id: scale.id,
+      body: scale.body,
+      value: scale.value,
+      load: scale.load,
+      sends: (now) => (scale.value() === now ? "" : scale.value()),
+      said: (value) => t.appConfig.scaleOf(value),
+      label: scale.label,
+    },
+  };
+  let now: AppConfig | null = null;
+
+  const rows = settingGroups.flatMap(([, keys]) => keys).map((key) => {
+    const spec = settingSpecs[key];
+    const control = controls[key];
+    const id = control.id;
+    const name = h("label", { class: "label", for: id });
+    const hint = spec.hint && h("p", { class: "hint opt-hint", id: id + "-hint", hidden: true });
+    // the long explanation opens on request, under the control
+    let help: HTMLButtonElement | undefined;
+    if (hint) {
+      const button = iconButton(
+        "info",
+        "",
+        () => {
+          hint.hidden = !hint.hidden;
+          button.setAttribute("aria-expanded", String(!hint.hidden));
+        },
+        { small: true, key: prefix + ":" + key + ":help" },
+      );
+      button.classList.add("opt-help");
+      button.setAttribute("aria-expanded", "false");
+      button.setAttribute("aria-controls", hint.id);
+      help = button;
+    }
+    const when = opts.live && h("span", { class: "opt-when", id: id + "-when" }, icon("clock", "sm"), h("span"));
+    const note = h("div", { class: "opt-note", id: id + "-note", "aria-live": "polite" });
+    const el = h(
+      "div",
+      { class: "field opt", "data-setting": key },
+      h("div", { class: "opt-head" }, name, help, when),
+      control.body,
+      h("p", { class: "field-error", role: "alert", id: id + "-error" }),
+      hint,
+      note,
+    );
+    // every control of the setting is described by its hint, when it
+    // applies and what a change does
+    const described = [id + "-error", hint && hint.id, when && when.id, note.id].filter(Boolean).join(" ");
+    for (const c of control.body.matches("input, select") ? [control.body] : control.body.querySelectorAll("input, select")) {
+      c.setAttribute("aria-describedby", described);
+    }
+
+    function draw(): void {
+      const sends = now && opts.live ? control.sends(now[key]) : "";
+      el.toggleAttribute("data-changed", sends !== "");
+      if (when) {
+        when.toggleAttribute("data-changed", sends !== "");
+      }
+      const was = now && sends !== "" ? t.appConfig.was(control.said(now[key])) : "";
+      // leaving the kept keyring password signs apps out at the VM's next
+      // start: the one change here that loses something
+      const leaving = key === "keyring" && sends === "off";
+      redraw(note, [sends, was], () => {
+        if (sends === "") {
+          return [];
+        }
+        if (leaving) {
+          return [callout("warn", "note", was + " " + spec.effect() + " " + t.appConfig.keyringLeave(opts.vm ?? ""))];
+        }
+        return [h("p", null, was + " " + spec.effect() + (key === "keyring" ? " " + t.appConfig.keyringKeep : ""))];
+      });
+    }
+
+    function label(): void {
+      name.textContent = spec.name();
+      if (hint && help) {
+        hint.textContent = spec.hint?.() ?? "";
+        help.setAttribute("aria-label", t.appConfig.about(spec.name()));
+        help.dataset.tip = t.appConfig.about(spec.name());
+      }
+      if (when) {
+        when.lastElementChild!.textContent = whenText(spec.when);
+      }
+      control.label();
+      // the note is written in the language of the page
+      delete note.dataset.shows;
+      draw();
+    }
+
+    control.body.addEventListener("input", () => {
+      const before = note.childElementCount;
+      draw();
+      // what a change does shows as it is made, also at the foot of a
+      // body that scrolls
+      if (note.childElementCount > before) {
+        note.scrollIntoView({ block: "nearest" });
+      }
+    });
+    label();
+    return { key, el, draw, label };
+  });
+
+  const groups = Object.fromEntries(
+    settingGroups.map(([group, keys]) => {
+      const title = h("h3", { class: "opt-group-title", id: prefix + "-group-" + group });
+      const el = h("section", { class: "opt-group", "aria-labelledby": title.id }, title, ...rows.filter((r) => keys.includes(r.key)).map((r) => r.el));
+      return [group, el];
+    }),
+  ) as Record<SettingGroup, HTMLElement>;
+
+  const form: AppSettingsForm = {
+    groups,
+    render,
+    load(config) {
+      now = config;
+      for (const r of rows) {
+        controls[r.key].load(config[r.key]);
+        r.draw();
+      }
+    },
+    value: (key) => controls[key].value(),
+    change: () => Object.fromEntries(rows.map((r) => [r.key, now ? controls[r.key].sends(now[r.key]) : controls[r.key].value()])) as unknown as AppConfig,
+    changes: () => rows.filter((r) => now !== null && controls[r.key].sends(now[r.key]) !== "").length,
+    label() {
+      for (const [group] of settingGroups) {
+        groups[group].firstElementChild!.textContent = groupName(group);
+      }
+      rows.forEach((r) => r.label());
+    },
+    focus: () => controls.clipboard.body.focus(),
+  };
+  form.label();
+  return form;
+}
 
 // programCard is a catalog program to tick. The name and the description
 // come from the catalog as they are.
@@ -119,24 +368,80 @@ export function programCard(app: CatalogApp, checked: boolean): { box: HTMLInput
   return { box, el };
 }
 
-// appDialog asks for a command line or a URL. programs, when given,
-// loads the one-click entries shown under the field.
-export function appDialog(
-  title: Child[],
-  text: Child[] | undefined,
-  run: (target: string) => void,
-  programs?: (list: HTMLElement, close: () => void) => void,
-): void {
+// How a VM takes an action that needs it running: at once, once the start
+// it is in has ended, or after a start the user agrees to.
+export type Readiness = "now" | "wait" | "start";
+
+export const readiness = (vm: VM | undefined): Readiness => (vm?.state === "stopped" ? "start" : vm?.state === "starting" ? "wait" : "now");
+
+export const strong = (name: string): HTMLElement => h("strong", { lang: "en" }, name);
+
+// runIn runs an action that needs the VM running. A task that starts the
+// VM first, or waits for it, is followed as a start is: the VM's row shows
+// the stages, and Stop there ends the wait and with it the action.
+export function runIn(vm: string, keys: string[], need: Readiness, call: (start: boolean) => Promise<Task>): void {
+  void (need === "now" ? act(keys, () => call(false)) : actStart(vm, () => call(true)));
+}
+
+// startDialog asks before a stopped VM starts for what was clicked. text
+// names the VM and what opens once it is ready.
+export function startDialog(vm: string, text: Part[], run: () => void): void {
+  dialog({
+    title: t.vms.startTitle(mono(vm)),
+    content: [h("p", null, ...text), h("p", { class: "hint" }, t.vms.startNote)],
+    submit: t.vms.startSubmit,
+    submitIcon: "play",
+    narrow: true,
+    onSubmit: run,
+  });
+}
+
+// openTerminal opens a terminal, and starts a stopped VM first once the
+// user agrees; pvm ssh would ask in the console instead. The terminal
+// opens only when the start ended with the VM ready.
+export function openTerminal(vm: VM | undefined, name: string, text: () => Part[], open: () => Promise<void>): void {
+  if (readiness(vm) !== "start") {
+    void act([], open);
+    return;
+  }
+  startDialog(name, text(), () =>
+    void actStart(name, () => backend().StartVM(name)).then(({ task }) => {
+      if (task?.ok) {
+        void act([], open);
+      }
+    }),
+  );
+}
+
+export interface AppDialogOptions {
+  title: Child[];
+  // text is a line under the title.
+  text?: Child[];
+  // need says whether the VM is started first, or is starting.
+  need: Readiness;
+  vm: string;
+  run: (target: string) => void;
+  // programs, when given, loads the one-click entries under the field.
+  programs?: (list: HTMLElement, close: () => void) => void;
+}
+
+// appDialog asks for a command line or a URL. On a stopped VM it says that
+// the VM starts first, so the one choice the user makes here is also the
+// consent to start it: no second dialog asks again.
+export function appDialog(o: AppDialogOptions): void {
   const target = input({ class: "input input--mono", placeholder: t.vms.runPlaceholder });
   const list = h("div");
   const d = dialog({
-    title,
-    text,
+    title: o.title,
+    text: o.text,
     content: [
+      o.need === "start" && callout("info", "note", ...t.vms.startApp(strong(o.vm))),
+      o.need === "wait" && callout("info", "note", ...t.vms.waitApp(strong(o.vm))),
       field(t.vms.runLabel, target, t.vms.runHint),
-      programs && h("div", { class: "field" }, h("span", { class: "label", id: "installed-programs" }, t.vms.installed), list),
+      o.programs && h("div", { class: "field" }, h("span", { class: "label", id: "installed-programs" }, t.vms.installed), list),
     ],
-    submit: t.vms.open,
+    submit: o.need === "start" ? t.vms.startSubmit : t.vms.open,
+    submitIcon: o.need === "start" ? "play" : undefined,
     validate: () => {
       if (target.value.trim() !== "") {
         return true;
@@ -144,18 +449,21 @@ export function appDialog(
       setFieldError(target, t.vms.runEmpty);
       return false;
     },
-    onSubmit: () => run(target.value),
+    onSubmit: () => o.run(target.value),
   });
-  programs?.(list, d.close);
+  o.programs?.(list, d.close);
 }
 
 function vmAppDialog(vm: VM): void {
-  const key = ["vm:" + vm.name];
-  appDialog(
-    t.vms.runTitle(mono(vm.name)),
-    undefined,
-    (target) => void act(key, () => backend().RunApp(vm.name, target)),
-    (list, close) => {
+  const need = readiness(vm);
+  const run = (call: (start: boolean) => Promise<Task>) => runIn(vm.name, ["vm:" + vm.name], need, call);
+  appDialog({
+    title: t.vms.runTitle(mono(vm.name)),
+    need,
+    vm: vm.name,
+    run: (target) => run((start) => backend().RunApp(vm.name, target, start)),
+    // the list is the one kept by the daemon, so a stopped VM has it too
+    programs: (list, close) => {
       list.replaceChildren(loading());
       backend()
         .InstalledApps(vm.name)
@@ -183,7 +491,7 @@ function vmAppDialog(vm: VM): void {
                       "data-tip": app.description,
                       onclick: () => {
                         close();
-                        void act(key, () => backend().RunCatalogApp(vm.name, app.id));
+                        run((start) => backend().RunCatalogApp(vm.name, app.id, start));
                       },
                     },
                     icon("window"),
@@ -195,7 +503,17 @@ function vmAppDialog(vm: VM): void {
           (e) => list.replaceChildren(h("p", { class: "field-error", role: "alert" }, t.vms.installedError, h("span", { lang: "en" }, errorText(e)))),
         );
     },
-  );
+  });
+}
+
+function openFiles(vm: VM): void {
+  const need = readiness(vm);
+  const run = () => runIn(vm.name, ["vm:" + vm.name], need, (start) => backend().OpenFiles(vm.name, start));
+  if (need === "start") {
+    startDialog(vm.name, t.vms.startFiles(strong(vm.name)), run);
+  } else {
+    run();
+  }
 }
 
 function installDialog(vm: VM): void {
@@ -232,72 +550,41 @@ function installDialog(vm: VM): void {
 }
 
 // The settings are per VM and kept by the daemon, so the dialog reads
-// them first and shows what is set now.
+// them first and shows what is set now. The groups stand in two columns,
+// so that every setting shows at once in the smallest window.
 function settingsDialog(vm: VM): void {
-  const choices = appConfigChoices();
-  const controls: Record<ChoiceSetting, HTMLSelectElement> = {
-    clipboard: select(choices.clipboard, newAppConfig.clipboard),
-    drop: select(choices.drop, newAppConfig.drop),
-    audio: select(choices.audio, newAppConfig.audio),
-    audio_silence: select(choices.audio_silence, newAppConfig.audio_silence),
-    keyring: select(choices.keyring, newAppConfig.keyring),
-  };
-  // the slider ends at the VM's vCPUs
-  const render = renderControl("settings:render");
-  render.setMost(vm.cpus);
-  const scale = scaleControl("settings:scale");
+  const form = appSettingsForm("settings", { live: true, vm: vm.name });
+  // the renderer slider ends at the VM's vCPUs
+  form.render.setMost(vm.cpus);
   const fields = h("div", { class: "slot" }, loading());
-  let now: AppConfig | null = null;
-  // an empty field is left as it is: only what differs is sent
-  const changed = (name: ChoiceSetting): string => (controls[name].value === now?.[name] ? "" : controls[name].value);
-  // a setting the user did not move is left as it is, even one above
-  // the VM's vCPUs, which the slider shows at its end
-  const renderChanged = (): string => (!render.touched() || render.bad() || render.value() === now?.render_cpus ? "" : render.value());
-  const change = (): AppConfig => ({
-    clipboard: changed("clipboard"),
-    drop: changed("drop"),
-    audio: changed("audio"),
-    audio_silence: changed("audio_silence"),
-    keyring: changed("keyring"),
-    render_cpus: renderChanged(),
-    scale: scale.value() === now?.scale ? "" : scale.value(),
-  });
+  let loaded = false;
   const d = dialog({
     title: t.vms.settingsTitle(mono(vm.name)),
     text: [t.vms.settingsText],
     content: [fields],
     submit: t.vms.apply,
+    wide: true,
     // a number out of range counts as a change, so that submitting says why
-    submitState: () => ({ disabled: now === null || (Object.values(change()).join("") === "" && !render.bad()) }),
+    submitState: () => {
+      const n = form.changes();
+      return { disabled: !loaded || (n === 0 && !form.render.bad()), label: n > 0 ? t.vms.applyChanges(n) : t.vms.apply };
+    },
     validate: () => {
-      const bad = render.bad();
-      setFieldError(render.num, bad ? t.appConfig.renderCpusRange(vm.cpus) : "");
+      const bad = form.render.bad();
+      setFieldError(form.render.num, bad ? t.appConfig.renderCpusRange(vm.cpus) : "");
       return !bad;
     },
-    onSubmit: () => void act(["vm:" + vm.name], () => backend().ConfigureApps(vm.name, change())),
+    onSubmit: () => void act(["vm:" + vm.name], () => backend().ConfigureApps(vm.name, form.change())),
   });
   backend()
     .AppSettings(vm.name)
     .then(
       (config) => {
-        now = config;
-        controls.clipboard.value = config.clipboard;
-        controls.drop.value = config.drop;
-        controls.audio.value = config.audio;
-        controls.audio_silence.value = config.audio_silence;
-        controls.keyring.value = config.keyring;
-        render.load(config.render_cpus);
-        scale.load(config.scale);
-        fields.replaceChildren(
-          field(t.appConfig.clipboard, controls.clipboard),
-          field(t.appConfig.drop, controls.drop, ...t.vms.dropHint(mono("~/Downloads"))),
-          field(t.appConfig.audio, controls.audio),
-          field(t.appConfig.audioSilence, controls.audio_silence, t.appConfig.audioSilenceHint),
-          scale.field,
-          render.field,
-          field(t.appConfig.keyring, controls.keyring, t.appConfig.keyringHint),
-        );
-        controls.clipboard.focus();
+        form.load(config);
+        loaded = true;
+        const g = form.groups;
+        fields.replaceChildren(h("div", { class: "opt-cols" }, h("div", { class: "opt-col" }, g.interaction, g.security), h("div", { class: "opt-col" }, g.performance)));
+        form.focus();
       },
       (e) => {
         fields.replaceChildren();
@@ -386,10 +673,8 @@ function row(vm: VM): HTMLElement {
   const key = ["vm:" + vm.name];
   const { working, waiting } = status(vm);
   const locked = working && !waiting;
-  const up = vm.state === "ready" || vm.state === "failed";
   const starting = vm.state === "starting";
   const k = (action: string) => "vm:" + vm.name + ":" + action;
-  const needsUp = (name: string) => (up ? name : t.vms.startFirst);
   return h(
     "article",
     { class: "item", "data-busy": locked ? "true" : undefined },
@@ -450,17 +735,16 @@ function row(vm: VM): HTMLElement {
               key: k("power"),
             })
           : button(t.vms.stop, () => void act(key, () => backend().StopVM(vm.name)), { size: "sm", icon: "stop", disabled: locked, key: k("power") }),
-        iconButton("terminal", t.vms.terminalIn(vm.name), () => void act([], () => backend().OpenTerminal(vm.name)), {
-          tip: t.common.terminal,
-          disabled: locked,
-          key: k("terminal"),
-        }),
-        iconButton("window", t.vms.appIn(vm.name), () => vmAppDialog(vm), { tip: needsUp(t.common.app), disabled: working || !up, key: k("app") }),
-        iconButton("files", t.vms.filesOf(vm.name), () => void act(key, () => backend().OpenFiles(vm.name)), {
-          tip: needsUp(t.common.files),
-          disabled: working || !up,
-          key: k("files"),
-        }),
+        // a stopped VM is started first, once the user agrees; a starting
+        // one is waited for
+        iconButton(
+          "terminal",
+          t.vms.terminalIn(vm.name),
+          () => openTerminal(vm, vm.name, () => t.vms.startTerminal(strong(vm.name)), () => backend().OpenTerminal(vm.name)),
+          { tip: t.common.terminal, disabled: locked, key: k("terminal") },
+        ),
+        iconButton("window", t.vms.appIn(vm.name), () => vmAppDialog(vm), { tip: t.common.app, disabled: working, key: k("app") }),
+        iconButton("files", t.vms.filesOf(vm.name), () => openFiles(vm), { tip: t.common.files, disabled: working, key: k("files") }),
         moreButton(
           t.common.moreFor(vm.name),
           [

@@ -456,6 +456,8 @@ export interface DialogOptions {
   // danger makes the dialog a confirmation: red, and starting on Cancel.
   danger?: boolean;
   narrow?: boolean;
+  // wide makes room for two columns, as App settings has.
+  wide?: boolean;
   // submitState is asked when the dialog opens and at every change of
   // the form: whether there is something to submit, and under what name.
   submitState?: () => { disabled: boolean; label?: string };
@@ -479,6 +481,8 @@ export function dialog(opts: DialogOptions): { close: () => void; fail: (text: s
     error.scrollIntoView({ block: "nearest" });
   };
   const cancel = button(t.common.cancel, () => el.close());
+  const body = h("div", { class: "dialog-body" }, ...opts.content, error);
+  edges(body);
   const submitLabel = h("span", null, opts.submit);
   const submit = h(
     "button",
@@ -525,13 +529,13 @@ export function dialog(opts: DialogOptions): { close: () => void; fail: (text: s
       h("h2", { class: "dialog-title", id: "dialog-title" }, ...opts.title),
       opts.text && h("p", { class: "dialog-desc" }, ...opts.text),
     ),
-    h("div", { class: "dialog-body" }, ...opts.content, error),
+    body,
     h("div", { class: "dialog-foot" }, cancel, submit),
   );
   const el = h(
     "dialog",
     {
-      class: classes("dialog", opts.narrow && "dialog--narrow"),
+      class: classes("dialog", opts.narrow && "dialog--narrow", opts.wide && "dialog--wide"),
       role: opts.danger ? "alertdialog" : undefined,
       "aria-labelledby": "dialog-title",
       onclose: () => {
@@ -552,6 +556,22 @@ export function dialog(opts: DialogOptions): { close: () => void; fail: (text: s
     first.focus();
   }
   return { close: () => el.close(), fail };
+}
+
+// edges marks a box that scrolls with what lies past its top and bottom
+// edges, so the page can show that there is more than fits.
+export function edges(box: HTMLElement): void {
+  const mark = () => {
+    box.toggleAttribute("data-above", box.scrollTop > 1);
+    box.toggleAttribute("data-below", box.scrollTop + box.clientHeight < box.scrollHeight - 1);
+  };
+  box.addEventListener("scroll", mark, { passive: true });
+  // what is in the box changes its height, as a hint that opens does
+  const sizes = new ResizeObserver(mark);
+  sizes.observe(box);
+  const watch = (nodes: Iterable<Node>) => [...nodes].forEach((n) => n instanceof Element && sizes.observe(n));
+  watch(box.children);
+  new MutationObserver((changes) => changes.forEach((c) => watch(c.addedNodes))).observe(box, { childList: true });
 }
 
 let fields = 0;

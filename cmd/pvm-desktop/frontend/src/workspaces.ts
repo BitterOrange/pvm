@@ -1,4 +1,4 @@
-import { backend, errorText, type Workspace } from "./api";
+import { backend, errorText, type VM, type Workspace } from "./api";
 import {
   badge,
   banner,
@@ -24,8 +24,8 @@ import {
 } from "./dom";
 import { language, t } from "./i18n";
 import { icon } from "./icons";
-import { act, busy, data, nav } from "./store";
-import { appDialog } from "./vms";
+import { act, busy, data, following, nav, onlyFollowed } from "./store";
+import { appDialog, openTerminal, readiness, runIn, startDialog, strong } from "./vms";
 
 // The CLI's rule, workspace.ValidID.
 const idRule = /^[a-z0-9][a-z0-9-]{0,62}$/;
@@ -161,12 +161,34 @@ function when(stamp: string): HTMLElement {
   return h("time", { datetime: stamp, "data-tip": at.toLocaleString(language(), { dateStyle: "medium", timeStyle: "short" }) }, ago(stamp));
 }
 
+// vmState says what the VM of a workspace is doing when it is not ready:
+// what needs it then starts it first or waits for it.
+const vmState = (vm: VM): HTMLElement =>
+  h(
+    "span",
+    { class: "ws-vm", "data-state": vm.state },
+    h("span", { class: "glyph glyph--sm", "data-state": vm.state, "aria-hidden": "true" }),
+    vm.state === "starting" && vm.stage !== "" ? t.vms.startingAt(vm.stage) : t.vms.state[vm.state],
+  );
+
+// What a row shows of its VM, so that the row follows it.
+function vmShows(name: string): unknown {
+  const vm = data.vms?.find((v) => v.name === name);
+  return [vm?.state, vm?.stage, busy.count("vm:" + name), following.count(name)];
+}
+
 const pathLine = (name: string, path: string): HTMLElement =>
   h("span", { class: "path" }, h("span", { class: "path-key" }, name), h("span", { class: "mono", lang: "en", "data-tip": path }, path));
 
 function row(ws: Workspace): HTMLElement {
   const key = ["workspace:" + ws.id];
   const working = busy.has(key[0]);
+  const vm = data.vms?.find((v) => v.name === ws.vm);
+  const need = readiness(vm);
+  // what needs the VM waits for the VM's own actions, as on its row; the
+  // wait of a start leaves the terminal free
+  const vmWorking = busy.has("vm:" + ws.vm);
+  const vmWaiting = vmWorking && onlyFollowed(ws.vm) && vm?.state === "starting";
   const k = (action: string) => "workspace:" + ws.id + ":" + action;
   const transfers = ws.mode !== "mount";
   const sync = (direction: "push" | "pull") => () => void act(key, () => backend().SyncWorkspace(ws.id, direction));
@@ -198,7 +220,13 @@ function row(ws: Workspace): HTMLElement {
           mode,
           ws.read_only && badge(t.workspaces.readOnly, "outline", icon("lock")),
         ),
-        h("p", { class: "item-sub" }, icon("server", "sm"), ws.vm === "" ? h("span", null, t.workspaces.noVm) : h("span", { lang: "en" }, ws.vm)),
+        h(
+          "p",
+          { class: "item-sub" },
+          icon("server", "sm"),
+          ws.vm === "" ? h("span", null, t.workspaces.noVm) : h("span", { lang: "en" }, ws.vm),
+          vm && vm.state !== "ready" && vmState(vm),
+        ),
       ),
       h(
         "div",
@@ -219,25 +247,46 @@ function row(ws: Workspace): HTMLElement {
           disabled: working,
           key: k("folder"),
         }),
-        iconButton("terminal", t.workspaces.terminalIn(ws.id), () => void act([], () => backend().OpenWorkspaceTerminal(ws.id)), {
-          tip: t.common.terminal,
-          disabled: working,
-          key: k("terminal"),
-        }),
+        // a stopped VM is started first, once the user agrees; a starting
+        // one is waited for
+        iconButton(
+          "terminal",
+          t.workspaces.terminalIn(ws.id),
+          () =>
+            openTerminal(
+              vm,
+              ws.vm,
+              () => t.workspaces.startTerminal(strong(ws.vm), mono(ws.guest_path)),
+              () => backend().OpenWorkspaceTerminal(ws.id),
+            ),
+          { tip: t.common.terminal, disabled: working || (vmWorking && !vmWaiting), key: k("terminal") },
+        ),
         iconButton(
           "window",
           t.workspaces.appIn(ws.id),
           () =>
-            appDialog(t.workspaces.runTitle(mono(ws.id)), t.workspaces.runText(mono(ws.guest_path)), (target) =>
-              void act(key, () => backend().RunWorkspaceApp(ws.id, target)),
-            ),
-          { tip: t.common.app, disabled: working, key: k("app") },
+            appDialog({
+              title: t.workspaces.runTitle(mono(ws.id)),
+              text: t.workspaces.runText(mono(ws.guest_path)),
+              need,
+              vm: ws.vm,
+              run: (target) => runIn(ws.vm, key, need, (start) => backend().RunWorkspaceApp(ws.id, target, start)),
+            }),
+          { tip: t.common.app, disabled: working || vmWorking, key: k("app") },
         ),
-        iconButton("files", t.workspaces.filesOf(ws.id), () => void act(key, () => backend().OpenWorkspaceFiles(ws.id)), {
-          tip: t.common.files,
-          disabled: working,
-          key: k("files"),
-        }),
+        iconButton(
+          "files",
+          t.workspaces.filesOf(ws.id),
+          () => {
+            const run = () => runIn(ws.vm, key, need, (start) => backend().OpenWorkspaceFiles(ws.id, start));
+            if (need === "start") {
+              startDialog(ws.vm, t.workspaces.startFiles(strong(ws.vm), mono(ws.guest_path)), run);
+            } else {
+              run();
+            }
+          },
+          { tip: t.common.files, disabled: working || vmWorking, key: k("files") },
+        ),
         moreButton(t.common.moreFor(ws.id), menu, { disabled: working, key: k("more") }),
       ),
     ),
@@ -281,7 +330,7 @@ export function render(): HTMLElement {
     all ?? [],
     (ws) => ws.id,
     // the age of the last transfer is part of what the row shows
-    (ws) => [ws, busy.has("workspace:" + ws.id), ws.mode === "mount" ? "" : ago(ws.last_transfer)],
+    (ws) => [ws, busy.has("workspace:" + ws.id), ws.mode === "mount" ? "" : ago(ws.last_transfer), vmShows(ws.vm)],
     row,
   );
   return page;

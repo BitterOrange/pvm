@@ -33,6 +33,7 @@ export const zh: Messages = {
   appConfig: {
     clipboard: "剪贴板",
     drop: "拖放文件",
+    dropOn: "开启，上传到虚拟机的 ~/Downloads",
     audio: "音频",
     off: "关闭",
     on: "开启",
@@ -52,6 +53,7 @@ export const zh: Messages = {
     renderCpusNumber: "渲染进程 CPU 数，输入数字",
     renderCpusAll: "不限制",
     renderCpusOf: (n, most) => n + " / " + most + " 个 vCPU",
+    renderCpusCount: (n) => n + " 个 vCPU",
     scale: "窗口缩放",
     scaleHint:
       "虚拟机用更少的像素绘制窗口，再由宿主机放大显示：1.5 倍时要画的像素不到原来的一半。Claude Desktop 等程序会因此画得更快，文字大小不变，但会略显模糊。已打开的窗口会重新连接，立即生效，并在宿主机上保持原来的大小。",
@@ -62,6 +64,22 @@ export const zh: Messages = {
     keyringHost: "密码保存在本机",
     keyringHint:
       "密码保存在本机时，虚拟机里的 login 密钥环会被加密，pvm 在应用启动前解锁它，Claude Desktop 等应用因此保持登录。交给虚拟机时，pvm 不碰密钥环，应用可能会询问它的密码。从“密码保存在本机”切换走之后，虚拟机重启时这些应用需要重新登录。",
+
+    interaction: "交互",
+    performance: "性能",
+    security: "安全",
+    about: (name) => "关于" + name,
+    whenNow: "立即生效",
+    whenLater: "新启动的程序",
+    whenNext: "下次启动应用",
+    was: (value) => "原为" + value + "。",
+    effectNow: "立即生效。",
+    effectReconnect: "立即生效：已打开的窗口会重新连接。",
+    effectScale: "立即生效：已打开的窗口会重新连接，并在宿主机上保持原来的大小。",
+    effectLater: "对之后启动的程序生效。",
+    effectNext: "下次启动应用时生效。",
+    keyringLeave: (vm) => vm + " 重启后，Claude Desktop 等应用需要重新登录。",
+    keyringKeep: "Claude Desktop 等应用之后会保持登录。",
   },
 
   resources: {
@@ -140,7 +158,6 @@ export const zh: Messages = {
     startingAt: (stage) => "启动中 · " + stage,
     start: "启动",
     stop: "停止",
-    startFirst: "请先启动虚拟机",
     terminalIn: (name) => "在 " + name + " 中打开终端",
     appIn: (name) => "在 " + name + " 中打开应用",
     filesOf: (name) => "打开 " + name + " 的文件",
@@ -162,11 +179,19 @@ export const zh: Messages = {
     installedError: "无法列出已安装的程序：",
     open: "打开",
 
+    startTitle: (name): Part[] => ["先启动 ", name, "？"],
+    startTerminal: (name): Part[] => [name, " 已停止。PVM Desktop 会先启动它，就绪后在其中打开终端。"],
+    startFiles: (name): Part[] => [name, " 已停止。PVM Desktop 会先启动它，就绪后打开它的文件管理器。"],
+    startApp: (name): Part[] => [name, " 已停止。会先启动它，再打开应用。"],
+    waitApp: (name): Part[] => [name, " 正在启动，就绪后打开应用。"],
+    startNote: "如果启动失败，或者期间虚拟机被停止，就不会打开。",
+    startSubmit: "启动并打开",
+
     settingsTitle: (name): Part[] => [name, " 的应用设置"],
     settingsText: "这台虚拟机里的程序窗口在宿主机上的行为。",
     settingsError: "无法读取应用设置：",
-    dropHint: (folder): Part[] => ["拖到虚拟机窗口上的文件会上传到虚拟机的 ", folder, "。"],
     apply: "应用",
+    applyChanges: (n) => "应用 " + n + " 项更改",
 
     resizeTitle: (name): Part[] => ["调整 ", name, " 的配置"],
     resizeText: "这台虚拟机可以使用多少宿主机资源，从下次启动起生效。",
@@ -342,6 +367,8 @@ export const zh: Messages = {
 
     runTitle: (id): Part[] => ["在工作区 ", id, " 中打开应用"],
     runText: (folder): Part[] => ["程序从 ", folder, " 启动。"],
+    startTerminal: (vm, folder): Part[] => [vm, " 已停止。PVM Desktop 会先启动它，就绪后在 ", folder, " 中打开终端。"],
+    startFiles: (vm, folder): Part[] => [vm, " 已停止。PVM Desktop 会先启动它，就绪后在文件管理器中打开 ", folder, "。"],
 
     newTitle: "新建工作区",
     id: "ID",

@@ -38,6 +38,7 @@ export const en = {
   appConfig: {
     clipboard: "Clipboard",
     drop: "Drop files",
+    dropOn: "On, into ~/Downloads in the VM",
     audio: "Audio",
     off: "Off",
     on: "On",
@@ -57,6 +58,7 @@ export const en = {
     renderCpusNumber: "Renderer CPUs, as a number",
     renderCpusAll: "No limit",
     renderCpusOf: (n: number, most: number) => n + " of " + most + " vCPUs",
+    renderCpusCount: (n: number) => plural(n, "vCPU", "vCPUs"),
     scale: "Window scale",
     scaleHint:
       "The VM draws its windows at fewer pixels and the host enlarges them: at 1.5 it draws less than half as many. Programs such as Claude Desktop then draw faster, and text keeps its size but looks softer. Open windows are attached again to apply it and keep their size on the host.",
@@ -67,6 +69,23 @@ export const en = {
     keyringHost: "Password kept on this computer",
     keyringHint:
       "With the password kept on this computer, the VM's login keyring is encrypted and pvm unlocks it before apps start, so apps such as Claude Desktop stay signed in. Left to the VM, pvm does not touch it, and apps may ask for its password. After a switch away from the kept password, such apps must sign in again once the VM restarts.",
+
+    // The groups of App settings, and what each setting says around it.
+    interaction: "Interaction",
+    performance: "Performance",
+    security: "Security",
+    about: (name: string) => "About " + name,
+    whenNow: "Applies now",
+    whenLater: "New programs",
+    whenNext: "Next app start",
+    was: (value: string) => "Was " + value + ".",
+    effectNow: "Applies now.",
+    effectReconnect: "Applies now: open windows reconnect.",
+    effectScale: "Applies now: open windows reconnect and keep their size on the host.",
+    effectLater: "Applies to programs started from now on.",
+    effectNext: "Applies the next time an app starts.",
+    keyringLeave: (vm: string) => "Once " + vm + " restarts, apps such as Claude Desktop must sign in again.",
+    keyringKeep: "Apps such as Claude Desktop then stay signed in.",
   },
 
   // The numbers of a VM, in the Create form and in Resize.
@@ -147,7 +166,6 @@ export const en = {
     startingAt: (stage: string) => "Starting · " + stage,
     start: "Start",
     stop: "Stop",
-    startFirst: "Start the VM first",
     terminalIn: (name: string) => "Open a terminal in " + name,
     appIn: (name: string) => "Open an app in " + name,
     filesOf: (name: string) => "Open the files of " + name,
@@ -169,11 +187,20 @@ export const en = {
     installedError: "Cannot list the installed programs: ",
     open: "Open",
 
+    // A stopped VM starts first, once the user agrees.
+    startTitle: (name: Node): Part[] => ["Start ", name, " first?"],
+    startTerminal: (name: Node): Part[] => [name, " is stopped. PVM Desktop starts it, then opens a terminal in it once it is ready."],
+    startFiles: (name: Node): Part[] => [name, " is stopped. PVM Desktop starts it, then opens its file manager once it is ready."],
+    startApp: (name: Node): Part[] => [name, " is stopped. It starts first, then the app opens."],
+    waitApp: (name: Node): Part[] => [name, " is starting. The app opens once it is ready."],
+    startNote: "If the start fails, or the VM is stopped meanwhile, nothing opens.",
+    startSubmit: "Start and open",
+
     settingsTitle: (name: Node): Part[] => ["App settings of ", name],
     settingsText: "How the windows of programs in this VM behave on the host.",
     settingsError: "Cannot read the app settings: ",
-    dropHint: (folder: Node): Part[] => ["Files dropped on the VM's windows upload into ", folder, " in the VM."],
     apply: "Apply",
+    applyChanges: (n: number) => "Apply " + plural(n, "change", "changes"),
 
     resizeTitle: (name: Node): Part[] => ["Resize ", name],
     resizeText: "How much of the host this VM gets, from its next start on.",
@@ -360,6 +387,8 @@ export const en = {
 
     runTitle: (id: Node): Part[] => ["Open an app in workspace ", id],
     runText: (folder: Node): Part[] => ["The program starts in ", folder, "."],
+    startTerminal: (vm: Node, folder: Node): Part[] => [vm, " is stopped. PVM Desktop starts it, then opens a terminal in ", folder, " once it is ready."],
+    startFiles: (vm: Node, folder: Node): Part[] => [vm, " is stopped. PVM Desktop starts it, then opens ", folder, " in its file manager once it is ready."],
 
     newTitle: "New workspace",
     id: "Id",

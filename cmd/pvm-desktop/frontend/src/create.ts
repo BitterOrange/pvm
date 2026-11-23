@@ -2,10 +2,10 @@ import { backend, errorText, type CatalogApp, type CreateRequest, type Image, ty
 import { banner, button, callout, command, field, focusKey, h, input, mono, redraw, select, type Child } from "./dom";
 import { onLanguage, t } from "./i18n";
 import { icon } from "./icons";
-import { cpuControl, limits, number, outside, renderControl, scaleControl } from "./resources";
+import { cpuControl, limits, number, outside } from "./resources";
 import { actStart, data, nav, refresh, toast } from "./store";
 import * as tasks from "./tasks";
-import { appConfigChoices, exitChoices, newAppConfig, programCard, stageBars } from "./vms";
+import { appSettingsForm, exitChoices, newAppConfig, programCard, stageBars } from "./vms";
 
 // The CLI's rules: vm.ValidateName and the user rule of vm.ValidateSpec.
 const nameRule = /^[a-zA-Z][a-zA-Z0-9_-]{0,31}$/;
@@ -20,14 +20,12 @@ const cpus = cpuControl("create:cpus");
 const mem = number({ min: limits.mem[0], max: limits.mem[1] });
 const disk = number({ min: limits.disk[0], max: limits.disk[1] });
 const exit = select([], "");
-const clipboard = select([], "");
-const drop = select([], "");
-const audio = select([], "");
-const audioSilence = select([], "");
-const keyring = select([], "");
+// the App settings in the same groups and controls as the dialog
+const settings = appSettingsForm("create", { live: false });
+settings.load(newAppConfig);
+const renderCpus = settings.render;
 // the renderer slider ends at the vCPUs chosen above; untouched it keeps
 // pvm's default
-const renderCpus = renderControl("create:render");
 function fitRender(): void {
   renderCpus.setMost(cpus.value());
   if (!renderCpus.touched()) {
@@ -35,8 +33,6 @@ function fitRender(): void {
   }
 }
 cpus.range.addEventListener("input", fitRender);
-const scale = scaleControl("create:scale");
-scale.load(newAppConfig.scale);
 fitRender();
 const imageNote = h("div", { class: "slot" });
 const exitWarning = h("div", { class: "slot" });
@@ -226,13 +222,13 @@ function request(): CreateRequest {
     exit: exit.value,
     // the default needs no step of its own
     app_config: {
-      clipboard: clipboard.value,
-      drop: drop.value,
-      audio: audio.value,
-      audio_silence: audioSilence.value,
-      keyring: keyring.value,
+      clipboard: settings.value("clipboard"),
+      drop: settings.value("drop"),
+      audio: settings.value("audio"),
+      audio_silence: settings.value("audio_silence"),
+      keyring: settings.value("keyring"),
       render_cpus: !renderCpus.touched() || renderCpus.value() === newAppConfig.render_cpus ? "" : renderCpus.value(),
-      scale: scale.value() === newAppConfig.scale ? "" : scale.value(),
+      scale: settings.value("scale") === newAppConfig.scale ? "" : settings.value("scale"),
     },
     apps: programBoxes.filter((b) => b.checked).map((b) => b.value),
   };
@@ -288,29 +284,12 @@ function label(): void {
     h(
       "div",
       { class: "form-col" },
-      group(
-        c.windows,
-        h("div", { class: "form-grid form-grid--2" }, field(t.appConfig.clipboard, clipboard), field(t.appConfig.drop, drop)),
-        // its choices are sentences, which half a row would cut
-        field(t.appConfig.audio, audio),
-        field(t.appConfig.audioSilence, audioSilence, t.appConfig.audioSilenceHint),
-        scale.field,
-        renderCpus.field,
-        field(t.appConfig.keyring, keyring, t.appConfig.keyringHint),
-      ),
+      group(c.windows, settings.groups.interaction, settings.groups.performance, settings.groups.security),
       group(c.programs, programs),
     ),
   );
-  const config = appConfigChoices();
-  for (const [el, name] of [[clipboard, "clipboard"], [drop, "drop"], [audio, "audio"], [audioSilence, "audio_silence"], [keyring, "keyring"]] as const) {
-    // the first layout starts from what a new VM has
-    const value = el.options.length === 0 ? newAppConfig[name] : el.value;
-    el.replaceChildren(...config[name].map((o) => h("option", { value: o.value }, o.label)));
-    el.value = value;
-  }
+  settings.label();
   cpus.label();
-  renderCpus.label();
-  scale.label();
   fillImages();
   const chosen = exit.value;
   exit.replaceChildren(...exitChoices().map((o) => h("option", { value: o.value }, o.label)));

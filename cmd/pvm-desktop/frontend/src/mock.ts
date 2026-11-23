@@ -205,6 +205,60 @@ function startStep(name: string, pace = 1300): Step {
   };
 }
 
+// waitStep follows a VM that is starting already, as the step that only
+// waits does in internal/desktop.
+function waitStep(name: string): Step {
+  return {
+    command: "pvm start " + name,
+    async play(say) {
+      let shown = "";
+      for (;;) {
+        const m = machine(name);
+        if (m.state === "ready") {
+          say(name + ": ready");
+          return;
+        }
+        if (m.state === "failed") {
+          throw new Error(name + " failed: " + m.hint);
+        }
+        if (m.state === "stopped") {
+          throw new Error(name + " stopped before it was ready; see `pvm logs " + name + "`");
+        }
+        if (m.stage !== "" && m.stage !== shown) {
+          shown = m.stage;
+          say(name + ": starting (" + m.stage + ")");
+        }
+        await sleep(300);
+      }
+    },
+  };
+}
+
+// startFirst is what a task given start runs before `pvm app`: a start
+// for a stopped VM, a wait for a starting one, nothing for the rest.
+function startFirst(name: string, start: boolean): Step[] {
+  const m = machines.find((x) => x.name === name);
+  if (!start || !m) {
+    return [];
+  }
+  return m.state === "stopped" ? [startStep(name)] : m.state === "starting" ? [waitStep(name)] : [];
+}
+
+// appStep is `pvm app`, which refuses a VM that is not running.
+function appStep(name: string, args: string): Step {
+  return {
+    command: "pvm app " + name + args,
+    async play() {
+      await sleep(500);
+      if (machine(name).state === "stopped") {
+        throw new Error("vm " + name + " is not running; pvm start " + name);
+      }
+    },
+  };
+}
+
+const appArgs = (target: string): string => (/^https?:\/\/\S+$/.test(target.trim()) ? " " : " -- ") + target.trim();
+
 function configFlags(c: AppConfig): string[] {
   return [c.clipboard && "--clipboard " + c.clipboard, c.drop && "--drop " + c.drop, c.audio && "--audio " + c.audio, c.audio_silence && "--audio-silence " + c.audio_silence, c.render_cpus && "--render-cpus " + c.render_cpus, c.scale && "--scale " + c.scale, c.keyring && "--keyring " + c.keyring].filter((f): f is string => f !== "");
 }
@@ -328,15 +382,17 @@ const backend: Backend = {
     }),
   DeleteVM: (name, confirmed) =>
     confirmed ? one("Delete " + name, "pvm rm " + name + " -y", ["deleted " + name], () => (machines = machines.filter((m) => m.name !== name))) : refuse("deleting " + name + " was not confirmed"),
-  RunApp: (name, target) => one("Open an app in " + name, "pvm app " + name + (/^https?:\/\/\S+$/.test(target.trim()) ? " " : " -- ") + target.trim()),
-  RunCatalogApp: (name, id) => {
+  RunApp: (name, target, start) => runTask("Open an app in " + name, [...startFirst(name, start), appStep(name, appArgs(target))]),
+  RunCatalogApp: (name, id, start) => {
     const app = catalog.find((a) => a.id === id);
     if (!app) {
       return refuse('unknown app "' + id + '"');
     }
-    return app.window ? one("Open " + app.name + " in " + name, "pvm app " + name + " -- " + app.start) : refuse(app.name + " runs in a terminal");
+    return app.window
+      ? runTask("Open " + app.name + " in " + name, [...startFirst(name, start), appStep(name, " -- " + app.start)])
+      : refuse(app.name + " runs in a terminal");
   },
-  OpenFiles: (name) => one("Open files in " + name, "pvm app " + name + " -- thunar"),
+  OpenFiles: (name, start) => runTask("Open files in " + name, [...startFirst(name, start), appStep(name, " -- thunar")]),
   ConfigureApps: (name, config) => (configFlags(config).length === 0 ? refuse("nothing to change") : runTask("App settings of " + name, [configure(name, config)])),
   InstallApps: (name, apps) => runTask("Install programs in " + name, [installStep(name, apps)]),
   SetDefaultVM: (name) => one("Default vm: " + name, "pvm default-vm " + name, [], () => (settings.default_vm = name)),
@@ -371,13 +427,19 @@ const backend: Backend = {
   TestExit: (name, speed) => one("Test exit " + name, "pvm exit test " + name + (speed ? " --speed" : ""), ["handshake: ok", "dns: ok", ...(speed ? ["down 182 Mbit/s, up 41 Mbit/s"] : []), name + ": ok"]),
   RemoveExit: (name, confirmed) =>
     confirmed ? one("Remove exit " + name, "pvm exit rm " + name, ["removed " + name], () => (nodes = nodes.filter((n) => n.name !== name))) : refuse("removing exit " + name + " was not confirmed"),
-  RunWorkspaceApp: (id, target) => {
+  RunWorkspaceApp: (id, target, start) => {
     const ws = workspaces.find((w) => w.id === id);
-    return one("Open an app in workspace " + id, "pvm app " + (ws?.vm ?? "") + (/^https?:\/\/\S+$/.test(target.trim()) ? " " : " -- ") + target.trim());
+    if (!ws) {
+      return refuse("workspace " + id + " does not exist");
+    }
+    return runTask("Open an app in workspace " + id, [...startFirst(ws.vm, start), appStep(ws.vm, appArgs(target))]);
   },
-  OpenWorkspaceFiles: (id) => {
+  OpenWorkspaceFiles: (id, start) => {
     const ws = workspaces.find((w) => w.id === id);
-    return one("Open files in workspace " + id, "pvm app " + (ws?.vm ?? "") + " -- thunar " + (ws?.guest_path ?? ""));
+    if (!ws) {
+      return refuse("workspace " + id + " does not exist");
+    }
+    return runTask("Open files in workspace " + id, [...startFirst(ws.vm, start), appStep(ws.vm, " -- thunar " + ws.guest_path)]);
   },
   SyncWorkspace: (id, direction) =>
     one("Workspace " + id + ": " + direction, "pvm workspace " + direction + " " + id, [direction + ": 14 files"], () => {
