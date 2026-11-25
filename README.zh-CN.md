@@ -31,7 +31,8 @@
 计划中：
 
 - [ ] 正式名称：Proxied Virtual Machine (PVM)，待与上游确认
-- [ ] WHPX：虚拟机内可用 AVX，并按虚拟机选择 QEMU（自带或自编译版，或系统里的官方版）
+- [ ] 安装包不再自带 QEMU：用 `pvm qemu` 选择新项目 pvm-qemu 从上游签名源码编译的版本，或本平台的官方版本（[计划](docs/design/qemu.md)）
+- [ ] WHPX：虚拟机内可用 AVX，并按虚拟机选择 QEMU（pvm-qemu 构建或本平台的官方版）
 - [ ] `pvm app`：macOS 和 Linux 上宿主机到虚拟机的剪贴板、WSL2，以及不用 ibus 的程序里的输入法输入
 - [ ] `pvm desktop` 像 `pvm app` 一样作为宿主机窗口打开，并在虚拟机文件管理器里打开工作区目录
 - [ ] PVM Desktop：在 Windows 上测试安装包、虚拟机未启动时保留工作区表单、资源管理器右键菜单"创建 PVM 工作区"、托盘图标，以及快照、端口映射和挂载的界面

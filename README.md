@@ -31,7 +31,8 @@ Shipped:
 Planned:
 
 - [ ] The full name: Proxied Virtual Machine (PVM), to be agreed upstream
-- [ ] WHPX: AVX in VMs, and a QEMU chosen per VM (the bundled or own build, or the system's)
+- [ ] QEMU outside the installers: a build of the new pvm-qemu project from signed upstream source, or the platform's official QEMU, chosen with `pvm qemu` ([plan](docs/design/qemu.md))
+- [ ] WHPX: AVX in VMs, and a QEMU chosen per VM (a pvm-qemu build or the platform's official one)
 - [ ] `pvm app`: host-to-guest clipboard on macOS and Linux, WSL2, and input method text in programs without ibus
 - [ ] `pvm desktop` as a host window like `pvm app`, opening the workspace folder in the VM's file manager
 - [ ] PVM Desktop: the installer test on Windows, keeping the workspace form when its VM is stopped, "Create PVM workspace" in the Explorer menu, a tray icon, and screens for snapshots, port maps and mounts
