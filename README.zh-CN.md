@@ -37,6 +37,7 @@
 - [ ] `pvm desktop` 像 `pvm app` 一样作为宿主机窗口打开，并在虚拟机文件管理器里打开工作区目录
 - [ ] PVM Desktop：在 Windows 上测试安装包、虚拟机未启动时保留工作区表单、资源管理器右键菜单"创建 PVM 工作区"、托盘图标，以及快照、端口映射和挂载的界面
 - [ ] `pvm exit-agent install|uninstall`，注册为 systemd 服务
+- [ ] M1 Mac：网关在 HVF 允许的 15 条 PCI 总线内启动
 - [ ] WHPX 下不支持 RAM 快照：直接拒绝并说明原因
 - [ ] Windows CI：其余包的测试，以及打 tag 时对安装包做冒烟测试
 
