@@ -36,6 +36,7 @@ Planned:
 - [ ] `pvm app`: host-to-guest clipboard on macOS and Linux, WSL2, and input method text in programs without ibus
 - [ ] `pvm desktop` as a host window like `pvm app`, opening the workspace folder in the VM's file manager
 - [ ] PVM Desktop: the installer test on Windows, keeping the workspace form when its VM is stopped, "Create PVM workspace" in the Explorer menu, a tray icon, and screens for snapshots, port maps and mounts
+- [ ] PVM Desktop updates itself: it downloads, verifies and runs the installer that matches how it was installed, and can run `pvm upgrade` for the local pvm
 - [ ] `pvm exit-agent install|uninstall` as a systemd service
 - [ ] M1 Macs: a gateway that boots within the 15 PCI buses HVF allows there
 - [ ] No RAM snapshots under WHPX, refused up front with the reason
