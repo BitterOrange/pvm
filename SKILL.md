@@ -276,6 +276,7 @@ pvm daemon status
 pvm daemon stop && pvm daemon start
 ```
 
+- Native Windows (WHPX) has no RAM snapshots: QEMU blocks migration of WHPX VMs, so `pvm snapshot create` fails there with "State blocked due to missing dirty memory tracking support". Use the WSL2 backend when you need them.
 - Snapshots suit machines left unused for days, or a checkpoint before risky operations. Existing snapshot artifacts are not overwritten implicitly. After a restore, the active restore overlay and any `.bak` hold VM data: snapshot removal or another snapshot is refused. Clone the stopped VM to flatten its current disk before creating a new checkpoint; do not manually delete backing files.
 - `pvm doctor`, `pvm audit dev1 --privacy`, and `pvm route explain dev1 example.com` inspect local state without network probes or starting the daemon; output is redacted. Route explanations describe configuration, not observed traffic, and do not resolve DNS.
 - Automatic update checks are off; opt in with `update_check: true` in config.yaml or `PVM_UPDATE_CHECK=1`. `PVM_NO_UPDATE_CHECK=1` overrides either. Failed checks are also cached for 24 hours.

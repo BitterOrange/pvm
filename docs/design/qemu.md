@@ -150,6 +150,8 @@ From v1.4.1 the first-run download is the only way a fresh Windows install gets 
 
 ## RAM snapshots
 
+**Not under WHPX.** QEMU's WHPX backend adds a migration blocker to every VM ("missing dirty memory tracking support, and some system register/state save-restore"), in every release including 11.1.3 and master, so RAM snapshots cannot work on native Windows with any build. This was confirmed in phase 0 on a WHPX host with both the weilnetz 11.1.0 build and 11.1.3-pvm1. Phase 1 makes `pvm snapshot create` and the daemon's snapshot endpoint refuse at once under WHPX, naming the WSL2 backend; the binding below applies to HVF, KVM and TCG. Lifting the limit needs dirty-page tracking and the missing register state in the WHPX backend, which is a QEMU change; a pvm-qemu patch would have to be an upstream commit first.
+
 `SnapshotManifest` drops `qemu_version` and gains:
 
 - `qemu_build`, the `BuildIdentity` of the running process from `run.json` (`RunState` gains `qemu_build`, written at start);

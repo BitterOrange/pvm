@@ -12,7 +12,7 @@ Personal QEMU dev VMs in a single binary: create an isolated Linux development m
 - **VM programs as native windows.** `pvm app dev1 -- gedit` or a web page opens as its own window on your desktop, while cookies, fingerprint and egress stay in the VM. Type with your own input method. See [Apps as host windows](#apps-as-host-windows).
 - **The full desktop in a browser tab.** `pvm desktop` opens the VM's own desktop, the same machine you reach over SSH. See [Browser desktop](#browser-desktop).
 - **Your project folders in the VM.** Mount a folder, keep two synced copies, or upload once and download the result. In a project folder, `pvm ssh` opens a shell in the same folder in its VM, and offers to start the VM first. See [Workspaces](#workspaces).
-- **Snapshots in seconds and clones**, loopback port maps, and a read-only `pvm audit` of routing and DNS.
+- **Snapshots in seconds** (not on native Windows, where QEMU cannot migrate WHPX VMs) **and clones**, loopback port maps, and a read-only `pvm audit` of routing and DNS.
 - **Windows without administrator rights.** One installer brings pvm, the PVM Desktop app, QEMU and the Xpra client. See [Windows installers](#windows-installers) and [PVM Desktop](#pvm-desktop).
 
 ## Roadmap
@@ -37,6 +37,7 @@ Planned:
 - [ ] `pvm desktop` as a host window like `pvm app`, opening the workspace folder in the VM's file manager
 - [ ] PVM Desktop: the installer test on Windows, keeping the workspace form when its VM is stopped, "Create PVM workspace" in the Explorer menu, a tray icon, and screens for snapshots, port maps and mounts
 - [ ] `pvm exit-agent install|uninstall` as a systemd service
+- [ ] No RAM snapshots under WHPX, refused up front with the reason
 - [ ] Windows CI: the remaining packages' tests, and an installer smoke test on tags
 
 Candidates:
