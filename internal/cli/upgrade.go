@@ -235,7 +235,7 @@ type upgradeRecovery struct {
 func verifyReleaseAttestation(path, tag string) error {
 	gh, err := exec.LookPath("gh")
 	if err != nil {
-		return fmt.Errorf("GitHub CLI (gh) with attestation support is required; install it before upgrading")
+		return fmt.Errorf("GitHub CLI (gh) with attestation support is required to verify release downloads; install it first")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

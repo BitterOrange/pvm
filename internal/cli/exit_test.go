@@ -65,6 +65,61 @@ func captureStdout(t *testing.T, fn func() int) (int, string) {
 // TCP /ping, UDP probe, and ICMP probe must all report ok without touching
 // any third-party service.
 func TestExitTestOwnAgentProbes(t *testing.T) {
+	ownAgentEntry(t)
+	code, out := captureStdout(t, func() int { return exitTest([]string{"my-exit"}) })
+	if code != 0 {
+		t.Fatalf("exitTest code = %d, output:\n%s", code, out)
+	}
+	for _, want := range []string{
+		"wireguard handshake: ok",
+		"tcp /ping: ok",
+		"udp probe: ok",
+		"icmp probe: ok",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "ifconfig.me") {
+		t.Errorf("output still references ifconfig.me:\n%s", out)
+	}
+}
+
+// An entry whose tunnel ip went stale (the agent re-enrolled its key from
+// a copy) handshakes but gets no data back; exitTest reads the ip back,
+// saves it and passes.
+func TestExitTestStaleTunnelIPReEnrolls(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits out one tunnel http timeout")
+	}
+	e, dir := ownAgentEntry(t)
+	want := e.TunnelIP
+	e.TunnelIP = "10.99.0.200"
+	if err := exit.SaveEntry(dir, e); err != nil {
+		t.Fatal(err)
+	}
+	code, out := captureStdout(t, func() int { return exitTest([]string{"my-exit"}) })
+	if code != 0 {
+		t.Fatalf("exitTest code = %d, output:\n%s", code, out)
+	}
+	for _, s := range []string{"another tunnel ip; entry updated, retrying", "tcp /ping: ok", "icmp probe: ok"} {
+		if !strings.Contains(out, s) {
+			t.Errorf("output missing %q:\n%s", s, out)
+		}
+	}
+	got, err := exit.LoadEntry(dir, "my-exit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.TunnelIP != want {
+		t.Fatalf("saved tunnel ip = %s, want the agent's %s", got.TunnelIP, want)
+	}
+}
+
+// ownAgentEntry starts an in-process exit-agent (userspace NAT), enrolls a
+// key and saves it as exit "my-exit" in a fresh PVM_HOME.
+func ownAgentEntry(t *testing.T) (*exit.Entry, string) {
+	t.Helper()
 	ln, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +163,8 @@ func TestExitTestOwnAgentProbes(t *testing.T) {
 	}
 	home := t.TempDir()
 	t.Setenv("PVM_HOME", home)
-	if err := exit.SaveEntry(filepath.Join(home, "exits"), &exit.Entry{
+	dir := filepath.Join(home, "exits")
+	e := &exit.Entry{
 		Name:         "my-exit",
 		Server:       srv.ControlAddr(),
 		Token:        "test-token",
@@ -121,25 +177,79 @@ func TestExitTestOwnAgentProbes(t *testing.T) {
 		ServerIP:     resp.ServerIP,
 		MTU:          resp.MTU,
 		Endpoint:     resp.Endpoint,
-	}); err != nil {
+	}
+	if err := exit.SaveEntry(dir, e); err != nil {
 		t.Fatal(err)
 	}
+	return e, dir
+}
 
-	code, out := captureStdout(t, func() int { return exitTest([]string{"my-exit"}) })
-	if code != 0 {
-		t.Fatalf("exitTest code = %d, output:\n%s", code, out)
-	}
-	for _, want := range []string{
-		"wireguard handshake: ok",
-		"tcp /ping: ok",
-		"udp probe: ok",
-		"icmp probe: ok",
+// The documented form puts the name before --file; flags-first works too.
+func TestExitImportArgs(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing.yaml")
+	for _, args := range [][]string{
+		{"my-sub", "--file", missing, "--select", "NODE"},
+		{"--file", missing, "my-sub"},
 	} {
+		out := captureStderr(t, func() { exitImport(args) })
+		if !strings.Contains(out, "read proxy config") {
+			t.Errorf("%v did not reach the file read: %q", args, out)
+		}
+	}
+	for _, args := range [][]string{
+		{"my-sub"},
+		{"--file", missing},
+		{"my-sub", "--file", missing, "extra"},
+	} {
+		out := captureStderr(t, func() { exitImport(args) })
+		if !strings.Contains(out, "usage: pvm exit import") {
+			t.Errorf("%v: want usage, got %q", args, out)
+		}
+	}
+}
+
+// An invite adds an exit with a fresh enroll token instead of the admin's,
+// and spends itself on first use.
+func TestExitAddWithInvite(t *testing.T) {
+	admin, dir := ownAgentEntry(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	ac := exit.NewClient(admin.Server, admin.Token, admin.Fingerprint)
+	created, err := ac.CreateInvite(ctx, exit.CreateInviteRequest{Name: "laptop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invite := exit.Invite{Server: admin.Server, Fingerprint: admin.Fingerprint, Secret: created.Secret}.String()
+
+	if code := exitAdd([]string{"x", "--invite", invite, "--server", admin.Server}); code == 0 {
+		t.Fatal("--invite with --server must be refused")
+	}
+	code, out := captureStdout(t, func() int {
+		return exitAdd([]string{"new-exit", "--invite", invite, "--transport", "udp"})
+	})
+	if code != 0 {
+		t.Fatalf("exit add --invite code = %d, output:\n%s", code, out)
+	}
+	for _, want := range []string{"invite redeemed", "(laptop, role enroll)", "matches the invite; pinned"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "ifconfig.me") {
-		t.Errorf("output still references ifconfig.me:\n%s", out)
+	e, err := exit.LoadEntry(dir, "new-exit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Token == "" || e.Token == admin.Token || e.Fingerprint != admin.Fingerprint {
+		t.Fatalf("entry must hold its own token and the invite's fingerprint: %+v", e)
+	}
+	peers, err := exit.NewClient(e.Server, e.Token, e.Fingerprint).ListPeers(ctx)
+	if err != nil || len(peers) != 1 || peers[0].IP != e.TunnelIP {
+		t.Fatalf("enroll token must see exactly its own peer, got %+v, %v", peers, err)
+	}
+	if code := exitAdd([]string{"again", "--invite", invite, "--transport", "udp"}); code == 0 {
+		t.Fatal("a used invite must not add another exit")
+	}
+	if _, err := exit.LoadEntry(dir, "again"); err == nil {
+		t.Fatal("a failed invite must not leave an entry")
 	}
 }

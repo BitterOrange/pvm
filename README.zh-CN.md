@@ -194,19 +194,27 @@ pvm qemu gc -y              # 清理旧版本留下的目录
 
 - 镜像：`ubuntu:26.04`、`ubuntu:24.04`、`debian:13`、`debian:12`。
 - 宿主机：arm64 的 macOS、amd64 的 Linux、amd64 的 Windows（原生 WHPX 或 WSL2）。
-- 虚拟机使用宿主机的架构，不支持跨架构模拟。Linux arm64 版本只用于 VPS 出口 agent。
+- 虚拟机使用宿主机的架构，不支持跨架构模拟。Linux arm64 版本只用于 VPS 出口。
 
 ## 在 VPS 上部署出口
 
-下载并校验适合 VPS 的发布包，创建只有所有者可读的 token 文件，然后把出口 agent 安装为 systemd 服务：
+VPS 上运行的是只含服务端功能的 `pvm-exit`。在宿主机上一条命令即可经 SSH 安装、启动并添加出口：
 
 ```bash
-pvm exit-agent install --listen :18443 --token-file /etc/pvm-exit/token
+pvm exit deploy my-exit --ssh root@vps.example.com
 ```
 
-再在宿主机上用 `pvm exit add` 注册。经 SSH 部署的完整流程（含指纹核对、测速和回滚）见 [SKILL.md](SKILL.md#standard-flow-deploy-an-exit-over-ssh)。
+SSH 已经验证了 VPS 的身份，所以证书指纹随一次性邀请串一起传回，不需要手动复制 token。用有 sudo 权限的用户时安装系统服务；`--user-mode` 安装 systemd 用户服务，使用用户态 NAT，完全不需要 root。
 
-VPS 防火墙需要放行 TCP 18443（控制面）、UDP 18443（WireGuard over UDP）和 TCP 18444（WireGuard over TCP），并允许转发 agent 的 `pvmexit0`、`pvmexit1` 设备的流量。ufw 默认的 `deny (routed)` 会拦截这种转发，需要放行（把 `eth0` 换成 VPS 的公网网卡）：
+系统服务以 `pvm-exit` 用户运行：内核 NAT 只授予 `CAP_NET_ADMIN` 和 `CAP_NET_RAW`，用户态 NAT 不授予任何 capability。配置在 `/etc/pvm-exit/config.yaml`。如果想在 VPS 上自己安装，可以用发布页的 `.deb`（`sudo apt install ./pvm-exit_<version>_amd64.deb`）或 `scripts/install-exit.sh`，然后在 VPS 上生成邀请串：
+
+```bash
+sudo pvm-exit invite laptop        # 输出：pvm exit add my-exit --invite pvmx1:...
+```
+
+邀请串只能用一次，15 分钟后过期。它给宿主机发放一个独立的 token，只能注册 peer，不能管理服务器；用 `pvm-exit token ls` 和 `pvm-exit token rm <id>` 查看和吊销。已经用 `pvm exit-agent install` 部署的 VPS，用 `pvm-exit init --migrate`（或 `pvm exit deploy ... --migrate`）迁移，token、指纹和 peer 都保留；`pvm exit-agent` 在 v1.5.0 删除。详见 [SKILL.md](SKILL.md#standard-flow-deploy-an-exit-over-ssh)。
+
+VPS 防火墙需要放行 TCP 18443（控制面）、UDP 18443（WireGuard over UDP）和 TCP 18444（WireGuard over TCP），并允许转发 `pvmexit0`、`pvmexit1` 设备的流量。ufw 默认的 `deny (routed)` 会拦截这种转发，需要放行（把 `eth0` 换成 VPS 的公网网卡）：
 
 ```bash
 ufw route allow in on pvmexit0 out on eth0
@@ -225,18 +233,20 @@ ufw route allow in on pvmexit1 out on eth0
 
 近期版本（全部版本见 [docs/release-notes](docs/release-notes)）：
 
-- **v1.4.1**（进行中）：合并上游 v1.3.0-1.3.1，带来 Mihomo 出口、`pvm check`、`pvm diag`、`pvm dashboard`、`--json`、`pvm job`、`pvm ssh-config`、`pvm exit-agent install`、`pvm image default`、daemon 重启后恢复虚拟机，以及 macOS 和 Linux 上的剪贴板桥。
+- **v1.4.1**（进行中）：合并上游 v1.3.0-1.3.1，带来 Mihomo 出口、`pvm check`、`pvm diag`、`pvm dashboard`、`--json`、`pvm job`、`pvm ssh-config`、`pvm-exit` 及 `pvm exit deploy` 和邀请串、`pvm image default`、daemon 重启后恢复虚拟机，以及 macOS 和 Linux 上的剪贴板桥。
 - **v1.4.0**：`pvm qemu`，使用固定的 pvm-qemu 构建或本平台官方 QEMU；M1 Mac 上网关可以启动。
 - **v1.3.x**：PVM Desktop、应用目录、密钥环设置、`pvm app` 的窗口缩放和输入法。
 
 接下来：
 
 - 安装包和 `install.sh` 不再自带 QEMU，改由 `pvm qemu install` 安装（[计划](docs/design/qemu.md)）
+- v1.4.2：Mihomo 出口支持订阅链接导入，以及手动和自动更新，更新时绝不自动切换已选节点
 - WHPX：虚拟机内可用 AVX，并按虚拟机选择 QEMU
 - PVM Desktop：从安装包完整测试、自行更新、托盘图标，以及快照、端口映射和挂载的界面
 - `pvm desktop` 像 `pvm app` 一样作为宿主机窗口
 - WSL2 上的 `pvm app`
 - Windows CI 覆盖其余的包，并对安装包做冒烟测试
+- v1.5.0：删除 `pvm exit-agent`，由 `pvm-exit` 取代
 
 细节和候选项见 [docs/roadmap.md](docs/roadmap.md)。
 

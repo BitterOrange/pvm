@@ -490,12 +490,12 @@ func TestClosedExitDoesNotMutateState(t *testing.T) {
 	del := httptest.NewRequest(http.MethodDelete, "/v1/peers/"+entry.TunnelIP, nil)
 	del.SetPathValue("ip", entry.TunnelIP)
 	recorder := httptest.NewRecorder()
-	srv.handleDeletePeer(recorder, del)
+	srv.handleDeletePeer(recorder, del, principal{ID: configAdminID, Role: RoleAdmin})
 	if recorder.Code != http.StatusServiceUnavailable {
 		t.Fatalf("delete after close: %d", recorder.Code)
 	}
 	recorder = httptest.NewRecorder()
-	srv.handleEnroll(recorder, httptest.NewRequest(http.MethodPost, "/v1/enroll", strings.NewReader(`{}`)))
+	srv.handleEnroll(recorder, httptest.NewRequest(http.MethodPost, "/v1/enroll", strings.NewReader(`{}`)), principal{ID: configAdminID, Role: RoleAdmin})
 	if recorder.Code != http.StatusServiceUnavailable {
 		t.Fatalf("enroll after close: %d", recorder.Code)
 	}

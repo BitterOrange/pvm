@@ -22,7 +22,15 @@ type Peer struct {
 	Hostname  string    `json:"hostname"`
 	Transport string    `json:"transport"` // udp | tcp
 	CreatedAt time.Time `json:"created_at"`
+	// Owner is the id of the enroll token that registered the peer; empty
+	// means the admin.
+	Owner string `json:"owner,omitempty"`
 }
+
+var (
+	errKeyOwned  = errors.New("this wireguard key is registered by another token")
+	errPeerLimit = errors.New("this token already holds its maximum number of peers")
+)
 
 // PeerStore allocates tunnel IPs per transport subnet and persists to JSON.
 // Subnets derive from a base octet: udp -> 10.<base>.0.0/16,
@@ -147,16 +155,33 @@ func (s *PeerStore) saveLocked() error {
 // Allocate assigns a tunnel IP for (pubkey, transport); re-enrolling with an
 // existing pubkey+transport returns the same peer (created=false).
 func (s *PeerStore) Allocate(pubkey, hostname, transport string) (Peer, bool, error) {
+	return s.AllocateOwned(pubkey, hostname, transport, "", 0)
+}
+
+// AllocateOwned is Allocate on behalf of an enroll token (owner): the key
+// must not belong to another token, and a new peer must fit in maxPeers
+// (0 = no limit). An empty owner is the admin, which may return any peer.
+func (s *PeerStore) AllocateOwned(pubkey, hostname, transport, owner string, maxPeers int) (Peer, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cidr, err := subnetOf(s.Subnets, transport)
 	if err != nil {
 		return Peer{}, false, err
 	}
+	held := 0
 	for _, p := range s.Peers {
 		if p.PubKey == pubkey && p.Transport == transport {
+			if owner != "" && p.Owner != owner {
+				return Peer{}, false, errKeyOwned
+			}
 			return p, false, nil
 		}
+		if owner != "" && p.Owner == owner {
+			held++
+		}
+	}
+	if owner != "" && maxPeers > 0 && held >= maxPeers {
+		return Peer{}, false, errPeerLimit
 	}
 	_, ipnet, _ := net.ParseCIDR(cidr)
 	used := map[string]bool{}
@@ -174,7 +199,7 @@ func (s *PeerStore) Allocate(pubkey, hostname, transport string) (Peer, bool, er
 		binary.BigEndian.PutUint32(b[:], n)
 		candidate := net.IP(b[:]).String()
 		if !used[candidate] {
-			p := Peer{IP: candidate, PubKey: pubkey, Hostname: hostname, Transport: transport, CreatedAt: time.Now()}
+			p := Peer{IP: candidate, PubKey: pubkey, Hostname: hostname, Transport: transport, CreatedAt: time.Now(), Owner: owner}
 			s.Peers = append(s.Peers, p)
 			if err := s.saveLocked(); err != nil {
 				s.Peers = s.Peers[:len(s.Peers)-1]

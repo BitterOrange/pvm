@@ -104,6 +104,7 @@ pvm 拒绝共享的内容：
 - 选了出口时，未匹配规则的 IPv4 流量应走该隧道。隧道失败时，这些流量必须保持断网，而不是改为直连出网。WireGuard 握手成功本身并不能证明 DNS、TCP、UDP 或 ICMP 转发正常。
 - 显式的 `direct`、`internal` 和绕过规则是例外。即使虚拟机有默认出口，它们也可能让流量和 DNS 经宿主机上行网络发出。在把一台虚拟机视为“只走出口”之前，先检查完整的规则集。
 - 直连出网（包括三层转发的直连虚拟机，以及按直连规则走的 fake-ip TCP/UDP/ICMP 中继）会丢弃私有（RFC1918）、回环、链路本地、CGNAT、基准测试和组播/保留地址，包括 slirp 的宿主机回环（`10.0.2.2`），除非有显式的 `internal` 域名规则或 `direct --cidr` 规则放行。解析到私有地址的普通直连域名规则不会隐式放行局域网访问。
+- 发往出口的流量在网关上也做同样的丢弃，不依赖出口本身：链路本地/元数据地址和其他非公网地址不会进入出口隧道。例外是 exit-agent 自己的隧道内地址（用于探测），以及显式 `pvm route add proxy --cidr <subnet> --via <exit>` 规则发往该出口的网段，后者还需 exit-agent 用 `--domain-allow-cidr` 放行。
 
 准入与暂停：
 
@@ -182,7 +183,10 @@ SSH：
 
 出口：
 
-- 出口控制面使用 HTTPS、bearer token 和证书指纹固定；数据面使用 WireGuard。请通过可信渠道核对初始指纹：仅靠首次使用时信任，无法认证第一次连接。
+- 出口控制面使用 HTTPS、bearer token 和证书指纹固定；数据面使用 WireGuard。请通过可信渠道核对初始指纹：仅靠首次使用时信任，无法认证第一次连接。`pvm-exit invite` 生成的邀请串带有指纹，它能在多大程度上认证服务器，取决于它经过的渠道：`pvm exit deploy` 经 SSH 取回邀请串，而 SSH 已经认证了 VPS；从聊天软件里粘贴的邀请串，可信程度只等于那个聊天软件。
+- `pvm exit deploy` 需要 sudo 密码时，pvm 在宿主机终端上不回显地读取，并经 SSH 连接只发送一次。在 VPS 上它只存在于安装 shell 的一个变量里，通过 stdin 交给 `sudo -S`：不出现在命令行、环境变量和文件中，sudo 执行的命令也拿不到 stdin。密码不会保存在任何地方。
+- 出口 token 分角色。admin token 文件和 admin token 可以管理服务器；邀请串发放的 enroll token 只能注册 peer，只能看到和删除自己的 peer，并受 peer 数量上限约束（默认 64）。服务器只保存已发放 token 和邀请串的 SHA-256 哈希（`auth.json`，权限 `0600`）。邀请串只能用一次，会过期：默认 15 分钟，最长 24 小时。`pvm-exit token rm` 吊销 token 时一并删除它的 peer，丢失的宿主机也就失去了隧道。
+- `pvm-exit` 以无特权的 `pvm-exit` 用户运行，并启用 `NoNewPrivileges`、`ProtectSystem=full` 和 `ProtectHome`。内核 NAT 只授予 `CAP_NET_ADMIN` 和 `CAP_NET_RAW`，但这两项仍能修改 VPS 的网络配置，所以不要让其他程序共用这个用户；用户态 NAT 不授予任何 capability，`pvm-exit init --user` 则完全不需要 root。旧的 `pvm exit-agent install` 服务在用 `pvm-exit init --migrate` 迁移之前仍以 root 运行。
 - 优先用 `--token-file` 指向只有所有者可读的普通文件，避免 bearer token 出现在进程参数和 shell 历史中。升级时保留现有服务 unit 的 token 和指纹；遇到证书指纹不符要先查明原因，不要直接固定新值。
 - WARP 注册把私钥和设备 token 保存在 `~/.pvm/exits/<name>.json`，权限 `0600`。只有被引用出口的 WireGuard 数据面参数会推送到受管网关；Cloudflare API token 不会。如果注册失败且远端回滚也失败，pvm 会把恢复用凭据保存在权限 `0600` 的 `~/.pvm/exits/<name>.warp-pending` 文件中，并在设备恢复或吊销之前拒绝再次注册同名出口。把这两个文件都当作机密，按恢复说明处理，不要删除待处理状态或重复使用该名称。
 - 每份导出的标准 WireGuard 客户端配置及其二维码都含有私钥。每台设备用单独的配置，不要多台设备共用一份。导出的文件、终端回滚内容和二维码都是机密。

@@ -84,6 +84,7 @@ type transportRT struct {
 type Server struct {
 	cfg         ServerConfig
 	store       *PeerStore
+	auth        *authStore
 	priv        string // base64 wg private key (shared by both transports)
 	pub         string
 	sugTZ       string // suggested client timezone (enroll response)
@@ -182,6 +183,9 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	}
 	s.store, err = LoadPeerStoreWithBase(filepath.Join(cfg.StateDir, "peers.json"), base)
 	if err != nil {
+		return nil, err
+	}
+	if s.auth, err = loadAuthStore(filepath.Join(cfg.StateDir, "auth.json")); err != nil {
 		return nil, err
 	}
 	if s.priv, err = loadOrCreateWGKey(filepath.Join(cfg.StateDir, "wg.key")); err != nil {
@@ -344,9 +348,15 @@ func (s *Server) Start() (string, error) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/health", s.handleHealth)
-	mux.HandleFunc("POST /v1/enroll", s.withAuth(s.handleEnroll))
-	mux.HandleFunc("DELETE /v1/peers/{ip}", s.withAuth(s.handleDeletePeer))
-	mux.HandleFunc("GET /v1/peers", s.withAuth(s.handleListPeers))
+	mux.HandleFunc("POST /v1/enroll", s.withAuth(RoleEnroll, s.handleEnroll))
+	mux.HandleFunc("DELETE /v1/peers/{ip}", s.withAuth(RoleEnroll, s.handleDeletePeer))
+	mux.HandleFunc("GET /v1/peers", s.withAuth(RoleEnroll, s.handleListPeers))
+	mux.HandleFunc("POST /v1/redeem", s.handleRedeem)
+	mux.HandleFunc("POST /v1/invites", s.withAuth(RoleAdmin, s.handleCreateInvite))
+	mux.HandleFunc("GET /v1/invites", s.withAuth(RoleAdmin, s.handleListInvites))
+	mux.HandleFunc("DELETE /v1/invites/{id}", s.withAuth(RoleAdmin, s.handleDeleteInvite))
+	mux.HandleFunc("GET /v1/tokens", s.withAuth(RoleAdmin, s.handleListTokens))
+	mux.HandleFunc("DELETE /v1/tokens/{id}", s.withAuth(RoleAdmin, s.handleDeleteToken))
 	s.http = &http.Server{
 		Addr:    s.cfg.Listen,
 		Handler: mux,
@@ -430,16 +440,36 @@ func (s *Server) startTransport(name string) error {
 	return nil
 }
 
-func (s *Server) withAuth(h http.HandlerFunc) http.HandlerFunc {
-	want := "Bearer " + s.cfg.Token
+// withAuth admits callers whose role is at least min: an admin passes any
+// check, an enroll token passes only enroll checks.
+func (s *Server) withAuth(min string, h func(http.ResponseWriter, *http.Request, principal)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		auth := r.Header.Get("Authorization")
-		if subtle.ConstantTimeCompare([]byte(auth), []byte(want)) != 1 {
+		p, ok := s.authenticate(r.Header.Get("Authorization"))
+		if !ok {
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
-		h(w, r)
+		if min == RoleAdmin && p.Role != RoleAdmin {
+			http.Error(w, `{"error":"this request needs an admin token"}`, http.StatusForbidden)
+			return
+		}
+		h(w, r, p)
 	}
+}
+
+func (s *Server) authenticate(header string) (principal, bool) {
+	secret, ok := strings.CutPrefix(header, "Bearer ")
+	if !ok || secret == "" {
+		return principal{}, false
+	}
+	if subtle.ConstantTimeCompare([]byte(secret), []byte(s.cfg.Token)) == 1 {
+		return principal{ID: configAdminID, Role: RoleAdmin}, true
+	}
+	t, ok := s.auth.lookup(secret)
+	if !ok {
+		return principal{}, false
+	}
+	return principal{ID: t.ID, Role: t.Role, MaxPeers: t.MaxPeers}, true
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -463,7 +493,7 @@ type enrollResponse struct {
 	SuggestedTZ string `json:"suggested_tz,omitempty"`
 }
 
-func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request, who principal) {
 	s.peerMu.Lock()
 	defer s.peerMu.Unlock()
 	if s.isClosed() {
@@ -487,7 +517,11 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"bad wg_pubkey"}`, http.StatusBadRequest)
 		return
 	}
-	peer, created, err := s.store.Allocate(req.PubKey, req.Hostname, req.Transport)
+	peer, created, err := s.store.AllocateOwned(req.PubKey, req.Hostname, req.Transport, who.owner(), who.MaxPeers)
+	if errors.Is(err, errKeyOwned) || errors.Is(err, errPeerLimit) {
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusForbidden)
+		return
+	}
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusInternalServerError)
 		return
@@ -531,7 +565,7 @@ func itoa(i int) string {
 	return fmt.Sprintf("%d", i)
 }
 
-func (s *Server) handleDeletePeer(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDeletePeer(w http.ResponseWriter, r *http.Request, who principal) {
 	s.peerMu.Lock()
 	defer s.peerMu.Unlock()
 	if s.isClosed() {
@@ -540,33 +574,49 @@ func (s *Server) handleDeletePeer(w http.ResponseWriter, r *http.Request) {
 	}
 	ip := r.PathValue("ip")
 	peer, ok := s.store.Get(ip)
-	if !ok {
+	// another token's peer looks absent, so tokens cannot probe each other
+	if !ok || (who.Role != RoleAdmin && peer.Owner != who.ID) {
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 		return
 	}
-	// device first: only when the key is actually off the wireguard device
-	// is it safe to drop the registration; otherwise the peer stays
-	// connectable while the API claims it is gone.
-	if t, ok := s.tr[peer.Transport]; ok {
-		pubHex, err := tunnel.Hex(peer.PubKey)
-		if err != nil {
-			http.Error(w, `{"error":"device remove peer"}`, http.StatusInternalServerError)
-			return
-		}
-		if err := t.dev.IpcSet(fmt.Sprintf("public_key=%s\nremove=true\n", pubHex)); err != nil {
-			http.Error(w, `{"error":"device remove peer"}`, http.StatusInternalServerError)
-			return
-		}
-	}
-	if _, _, err := s.store.Remove(ip); err != nil {
-		http.Error(w, `{"error":"store"}`, http.StatusInternalServerError)
+	if err := s.removePeerLocked(peer); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, map[string]any{"removed": ip})
 }
 
-func (s *Server) handleListPeers(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, map[string]any{"peers": s.store.List()})
+// removePeerLocked takes the key off the wireguard device before dropping
+// the registration: otherwise the peer stays connectable while the API
+// claims it is gone. The caller holds peerMu.
+func (s *Server) removePeerLocked(peer Peer) error {
+	if t, ok := s.tr[peer.Transport]; ok {
+		pubHex, err := tunnel.Hex(peer.PubKey)
+		if err != nil {
+			return errors.New("device remove peer")
+		}
+		if err := t.dev.IpcSet(fmt.Sprintf("public_key=%s\nremove=true\n", pubHex)); err != nil {
+			return errors.New("device remove peer")
+		}
+	}
+	if _, _, err := s.store.Remove(peer.IP); err != nil {
+		return errors.New("store")
+	}
+	return nil
+}
+
+func (s *Server) handleListPeers(w http.ResponseWriter, _ *http.Request, who principal) {
+	peers := s.store.List()
+	if who.Role != RoleAdmin {
+		own := []Peer{}
+		for _, p := range peers {
+			if p.Owner == who.ID {
+				own = append(own, p)
+			}
+		}
+		peers = own
+	}
+	writeJSON(w, map[string]any{"peers": peers})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

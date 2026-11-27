@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -24,6 +26,9 @@ import (
 
 func CmdExitAgent(args []string) int {
 	if len(args) > 0 && (args[0] == "install" || args[0] == "uninstall") {
+		if args[0] == "install" {
+			fmt.Fprintln(os.Stderr, "note: pvm exit-agent is replaced by pvm-exit and removed in v1.5.0; new VPSes: pvm exit deploy, existing ones: pvm-exit init --migrate")
+		}
 		return cmdExitAgentService(args[0], args[1:])
 	}
 	fs := newFlagSet("exit-agent", "install|uninstall | --token <tok> [--listen :18443] [--transport both|udp|tcp]")
@@ -96,7 +101,7 @@ func CmdExitAgent(args []string) int {
 
 func CmdExit(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: pvm exit <add|add-warp|set|ls|rm|test|client-config> [args]")
+		fmt.Fprintln(os.Stderr, "usage: pvm exit <add|add-warp|deploy|set|ls|rm|test|client-config> [args]")
 		return 2
 	}
 	switch args[0] {
@@ -108,6 +113,8 @@ func CmdExit(args []string) int {
 		return exitAdd(args[1:])
 	case "add-warp":
 		return exitAddWARP(args[1:])
+	case "deploy":
+		return exitDeploy(args[1:])
 	case "set":
 		return exitSet(args[1:])
 	case "ls", "list":
@@ -137,7 +144,8 @@ func exitsDir() (string, error) {
 }
 
 func exitAdd(args []string) int {
-	fs := newFlagSet("exit add", "<name> --server host:port --token <tok> [--transport auto|udp|tcp] [--tz TZ] [--locale L]")
+	fs := newFlagSet("exit add", "<name> --invite <pvmx1:...|-> | --server host:port --token-file <file> [--fingerprint <sha256>] [--transport auto|udp|tcp] [--tz TZ] [--locale L]")
+	invite := fs.String("invite", "", "one-time invite from `pvm-exit invite` (- reads it from stdin); replaces --server, --token and --fingerprint")
 	server := fs.String("server", "", "control plane host:port")
 	token := fs.String("token", "", "control plane token (prefer --token-file)")
 	tokenFile := fs.String("token-file", "", "private file containing the control token")
@@ -163,12 +171,32 @@ func exitAdd(args []string) int {
 		}
 		name = fs.Arg(0)
 	}
+	var inv *exit.Invite
+	if *invite != "" {
+		if *server != "" || *token != "" || *tokenFile != "" || *fpExpect != "" {
+			return fatalf("--invite already carries the server, token and fingerprint; drop --server, --token, --token-file and --fingerprint")
+		}
+		raw := *invite
+		if raw == "-" {
+			line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+			if err != nil && line == "" {
+				return fatalf("read invite from stdin: %v", err)
+			}
+			raw = line
+		}
+		parsed, err := exit.ParseInvite(raw)
+		if err != nil {
+			return fatalf("%v", err)
+		}
+		inv = &parsed
+		*server = inv.Server
+	}
 	value, err := loadToken(*token, *tokenFile)
 	if err != nil {
 		return fatalf("%v", err)
 	}
 	*token = value
-	if name == "" || *server == "" || *token == "" {
+	if name == "" || *server == "" || (*token == "" && inv == nil) {
 		fs.Usage()
 		return 2
 	}
@@ -194,16 +222,45 @@ func exitAdd(args []string) int {
 	if _, err := exit.LoadEntry(dir, name); err == nil {
 		return fatalf("exit %q already exists", name)
 	}
+	// Redeeming pins the invite's fingerprint, so the secret only reaches
+	// the server the invite was created on.
+	redeemed := ""
+	if inv != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		red, err := exit.NewClient(inv.Server, "", inv.Fingerprint).Redeem(ctx, inv.Secret)
+		cancel()
+		if err != nil {
+			return fatalf("redeem invite: %v", err)
+		}
+		*token, *fpExpect = red.Token, inv.Fingerprint
+		redeemed = red.ID
+		fmt.Printf("invite redeemed: token %s (%s, role %s)\n", red.ID, red.Name, red.Role)
+	}
+	fail := func(format string, a ...any) int {
+		if redeemed != "" {
+			// The invite is spent; say which token to revoke.
+			format += "; the invite is used up and token " + redeemed + " holds no exit here: get a new invite and revoke it with `pvm-exit token rm " + redeemed + "`"
+		}
+		return fatalf(format, a...)
+	}
 
-	// TOFU: capture the server cert fingerprint on first contact, then pin it.
+	// Without an invite or --fingerprint this is trust on first use: the
+	// fingerprint seen now is pinned.
 	fp, err := exit.ProbeFingerprint(*server)
 	if err != nil {
-		return fatalf("probe %s: %v", *server, err)
+		return fail("probe %s: %v", *server, err)
 	}
 	if *fpExpect != "" && !strings.EqualFold(*fpExpect, fp) {
-		return fatalf("fingerprint mismatch: got %s, want %s (possible MITM; aborting before sending the token)", fp, *fpExpect)
+		return fail("fingerprint mismatch: got %s, want %s (possible MITM; aborting before sending the token)", fp, *fpExpect)
 	}
-	fmt.Printf("server cert fingerprint: %s (pinned)\n", fp)
+	switch {
+	case inv != nil:
+		fmt.Printf("server cert fingerprint: %s (matches the invite; pinned)\n", fp)
+	case *fpExpect != "":
+		fmt.Printf("server cert fingerprint: %s (matches --fingerprint; pinned)\n", fp)
+	default:
+		fmt.Printf("server cert fingerprint: %s (trusted on first use; pinned)\n", fp)
+	}
 
 	var e *exit.Entry
 	var suggestedTZ string
@@ -231,7 +288,7 @@ func exitAdd(args []string) int {
 			for _, pr := range probes {
 				exit.RevokeProbe(ctx, *server, *token, fp, pr)
 			}
-			return fatalf("%v", err)
+			return fail("%v", err)
 		}
 		for _, pr := range probes {
 			if pr != winner {
@@ -244,11 +301,11 @@ func exitAdd(args []string) int {
 	} else {
 		priv, err := tunnel.GenerateKey()
 		if err != nil {
-			return fatalf("%v", err)
+			return fail("%v", err)
 		}
 		pub, err := tunnel.PublicKey(priv)
 		if err != nil {
-			return fatalf("%v", err)
+			return fail("%v", err)
 		}
 		host, err := os.Hostname()
 		if err != nil {
@@ -259,7 +316,7 @@ func exitAdd(args []string) int {
 		client := exit.NewClient(*server, *token, fp)
 		resp, err := client.Enroll(ctx, pub, host, *transport)
 		if err != nil {
-			return fatalf("enroll: %v", err)
+			return fail("enroll: %v", err)
 		}
 		e = &exit.Entry{
 			Name:         name,
@@ -284,7 +341,7 @@ func exitAdd(args []string) int {
 		e.AutoTZ = suggestedTZ
 	}
 	if err := exit.SaveEntry(dir, e); err != nil {
-		return fatalf("save entry: %v", err)
+		return fail("save entry: %v", err)
 	}
 	fmt.Printf("exit %q added: transport=%s tunnel_ip=%s endpoint=%s mtu=%d\n",
 		name, e.Transport, e.TunnelIP, e.Endpoint, e.MTU)
@@ -556,6 +613,10 @@ func exitTest(args []string) int {
 			Geo     *netcheck.GeoInfo `json:"geo"`
 		}
 		if err := c.Post("/v1/exits/"+url.PathEscape(name)+"/probe", nil, &res); err != nil {
+			if errors.Is(err, daemon.ErrDaemonOutdated) {
+				fmt.Printf("egress probe: skipped (%v)\n", err)
+				return
+			}
 			fmt.Printf("egress=fail: real internet egress through %s failed: %v (check VPS firewall forwarding, e.g. ufw route allow)\n", name, err)
 			return
 		}
@@ -595,17 +656,35 @@ func exitTest(args []string) int {
 			return fatalf("handshake after re-enroll: %v", err)
 		}
 	}
-	defer t.Close()
-	serverIP := e.ServerIP
+	defer func() { t.Close() }()
 	fmt.Println("wireguard handshake: ok")
 	if e.IsWARP() {
 		fmt.Println("own-agent probes: skipped (WARP exits have no pvm exit-agent to probe)")
 		probePublicEgress()
 		return 0
 	}
-	sip := netip.MustParseAddr(serverIP)
+	sip := netip.MustParseAddr(e.ServerIP)
 	if _, err := t.Ping(ctx, sip); err != nil {
-		return fatalf("tcp /ping: %v", err)
+		// A handshake without data means the agent knows this key under
+		// another tunnel ip (it was reaped and re-enrolled from a copy of
+		// this entry) and drops our source address. Enroll is idempotent
+		// per key, so it only reads that ip back.
+		oldIP := e.TunnelIP
+		if rerr := reEnrollExit(dir, e); rerr != nil {
+			return fatalf("tcp /ping: %v (re-enroll: %v)", err, rerr)
+		}
+		if e.TunnelIP == oldIP {
+			return fatalf("tcp /ping: %v", err)
+		}
+		fmt.Println("tcp /ping failed: the exit holds this key under another tunnel ip; entry updated, retrying...")
+		t.Close()
+		if t, err = dial(); err != nil {
+			return fatalf("handshake after re-enroll: %v", err)
+		}
+		sip = netip.MustParseAddr(e.ServerIP)
+		if _, err := t.Ping(ctx, sip); err != nil {
+			return fatalf("tcp /ping after re-enroll: %v", err)
+		}
 	}
 	fmt.Println("tcp /ping: ok")
 	if err := t.ProbeUDP(ctx, sip); err != nil {

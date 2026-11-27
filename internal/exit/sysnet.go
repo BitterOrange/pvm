@@ -130,7 +130,13 @@ func ConfigureTUN(name, addrWithMask string) error {
 	return nil
 }
 
+// EnableIPForward turns on IPv4 forwarding. When it is already on, as an
+// installer leaves it for an agent running without root, nothing is
+// written.
 func EnableIPForward() error {
+	if b, err := os.ReadFile("/proc/sys/net/ipv4/ip_forward"); err == nil && strings.TrimSpace(string(b)) == "1" {
+		return nil
+	}
 	if out, err := exec.Command("sysctl", "-w", "net.ipv4.ip_forward=1").CombinedOutput(); err != nil {
 		return fmt.Errorf("sysctl ip_forward: %v: %s", err, out)
 	}

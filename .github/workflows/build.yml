@@ -95,13 +95,14 @@ jobs:
           GOOS=windows GOARCH=amd64 go vet ./...
           GOOS=windows GOARCH=amd64 go build ./...
           sh -n scripts/install.sh
-          bash -n script/build.sh script/build-desktop.sh script/pack_assets.sh script/ci/*.sh script/windows/*.sh
+          sh -n scripts/install-exit.sh
+          for f in script/build.sh script/build-desktop.sh script/pack_assets.sh script/package-exit-deb.sh script/ci/*.sh script/windows/*.sh; do bash -n "$f"; done
           python3 -B -m unittest discover -s script/ci -p 'test_*.py'
       - name: Test and vet native VPS agent
         if: ${{ !matrix.host }}
         run: |
-          go test ./internal/exit ./internal/tunnel ./internal/warp ./internal/keys ./internal/fsutil
-          go vet ./internal/exit ./internal/tunnel ./internal/warp ./internal/keys ./internal/fsutil
+          go test ./internal/exit ./internal/exitsvc ./internal/tunnel ./internal/warp ./internal/keys ./internal/fsutil
+          go vet ./internal/exit ./internal/exitsvc ./cmd/pvm-exit ./internal/tunnel ./internal/warp ./internal/keys ./internal/fsutil
       - name: Cache build tools
         if: matrix.host
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -137,11 +138,49 @@ jobs:
           ./pvm security > "$RUNNER_TEMP/security.md"
           cmp SKILL.md "$RUNNER_TEMP/skill.md"
           cmp SECURITY.md "$RUNNER_TEMP/security.md"
+      - name: Build pvm-exit and check its package
+        if: runner.os == 'Linux'
+        run: |
+          export PVM_VERSION="$(cat VERSION)"
+          CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags "-s -w -buildid= -X github.com/huangzheng2016/pvm/internal/buildinfo.Version=${PVM_VERSION}" -o pvm-exit ./cmd/pvm-exit
+          test "$(./pvm-exit version)" = "$PVM_VERSION"
+          deb=$(bash script/package-exit-deb.sh pvm-exit "$PVM_VERSION" "${MATRIX_OUT##*_}" "$RUNNER_TEMP/deb")
+          dpkg-deb --info "$deb"
+          dpkg-deb --contents "$deb"
+          dpkg-deb --fsys-tarfile "$deb" | tar -xO ./usr/lib/systemd/system/pvm-exit.service | grep -Fx 'ExecStart=/usr/bin/pvm-exit serve --config /etc/pvm-exit/config.yaml'
+        env:
+          MATRIX_OUT: ${{ matrix.out }}
+      # On the runner's own architecture: the package starts the service as
+      # the pvm-exit user, and this pvm joins it with an invite.
+      - name: Smoke-test the pvm-exit package
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo dpkg -i "$RUNNER_TEMP"/deb/pvm-exit_*.deb
+          systemctl is-active pvm-exit
+          pid=$(systemctl show -p MainPID --value pvm-exit)
+          test "$(ps -o user= -p "$pid")" = pvm-exit
+          grep -E '^CapAmb:\s+0000000000003000$' "/proc/$pid/status"
+          export PVM_HOME="$RUNNER_TEMP/pvm-home"
+          sudo pvm-exit invite ci-host --raw --host 127.0.0.1 | ./pvm exit add ci-exit --invite - --transport udp
+          ./pvm exit test ci-exit | tee "$RUNNER_TEMP/exit-test.txt"
+          for p in 'wireguard handshake' 'tcp /ping' 'udp probe' 'icmp probe'; do grep -Fx "$p: ok" "$RUNNER_TEMP/exit-test.txt"; done
+          sudo pvm-exit token ls | grep -F ci-host
+          sudo dpkg -r pvm-exit
+          if systemctl is-active --quiet pvm-exit; then echo "pvm-exit still running after removal" >&2; exit 1; fi
+          sudo test -f /etc/pvm-exit/config.yaml
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: github.event_name == 'push'
         with:
           name: raw-${{ matrix.out }}
           path: pvm
+          retention-days: 14
+          if-no-files-found: error
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: github.event_name == 'push' && runner.os == 'Linux'
+        with:
+          name: raw-pvm-exit_linux_${{ endsWith(matrix.out, 'arm64') && 'arm64' || 'amd64' }}
+          path: pvm-exit
           retention-days: 14
           if-no-files-found: error
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -335,6 +374,12 @@ jobs:
           name: raw-pvm-desktop_windows_amd64
           github-token: ${{ github.token }}
           run-id: ${{ needs.prepare.outputs.run_id || github.run_id }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        if: runner.os == 'Linux'
+        with:
+          name: raw-pvm-exit_linux_${{ endsWith(matrix.out, 'arm64') && 'arm64' || 'amd64' }}
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.prepare.outputs.run_id || github.run_id }}
       - name: Verify reused binary
         run: |
           chmod +x pvm
@@ -350,6 +395,13 @@ jobs:
             grep -F 'go1.27.4' "$RUNNER_TEMP/build-info-desktop.txt"
             grep -F 'github.com/huangzheng2016/pvm/cmd/pvm-desktop' "$RUNNER_TEMP/build-info-desktop.txt"
             grep -F -e '-tags=desktop,production,wv2runtime.browser' "$RUNNER_TEMP/build-info-desktop.txt"
+          fi
+          if [ '${{ runner.os }}' = 'Linux' ]; then
+            chmod +x pvm-exit
+            test "$(./pvm-exit version)" = "$(cat VERSION)"
+            go version -m pvm-exit > "$RUNNER_TEMP/build-info-exit.txt"
+            grep -F 'go1.27.4' "$RUNNER_TEMP/build-info-exit.txt"
+            grep -F 'github.com/huangzheng2016/pvm/cmd/pvm-exit' "$RUNNER_TEMP/build-info-exit.txt"
           fi
       - name: Check release readiness
         if: startsWith(github.ref, 'refs/tags/')
@@ -404,6 +456,11 @@ jobs:
             tar -czf pvm_windows_amd64.tar.gz pvm.exe
           fi
           tar -czf '${{ matrix.out }}.tar.gz' pvm
+          if [ '${{ runner.os }}' = 'Linux' ]; then
+            arch='${{ matrix.out }}'; arch=${arch##*_}
+            tar -czf "pvm-exit_linux_${arch}.tar.gz" pvm-exit
+            bash script/package-exit-deb.sh pvm-exit "$(cat VERSION)" "$arch" .
+          fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: startsWith(github.ref, 'refs/tags/')
         with:
@@ -414,6 +471,7 @@ jobs:
             *.tar
             *_setup.exe
             *_setup.msi
+            *.deb
       - name: Remove temporary signing credentials
         if: always() && runner.os == 'macOS'
         run: |
@@ -437,7 +495,7 @@ jobs:
           merge-multiple: true
       - name: Hash release artifacts
         working-directory: release
-        run: sha256sum *.tar.gz *.tar *_setup.exe *_setup.msi > SHA256SUMS
+        run: sha256sum *.tar.gz *.tar *_setup.exe *_setup.msi *.deb > SHA256SUMS
       - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
           subject-path: release/*
