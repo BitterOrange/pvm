@@ -181,8 +181,7 @@ func cmdImageBuild(p *paths.Paths, spec string, keep, fresh bool, cpus, mem, dis
 	if err != nil {
 		return fatalf("image build: %v", err)
 	}
-	fmt.Printf("built golden %s v%d (%s)\n  docker: %s\n",
-		spec, entry.Version, entry.File, strings.Join(entry.DockerImages, ", "))
+	fmt.Printf("built golden %s v%d (%s)\n", spec, entry.Version, entry.File)
 	return 0
 }
 

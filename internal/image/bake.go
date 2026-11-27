@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -352,6 +353,11 @@ func applyKernelArgs(out io.Writer, r *sshRunner, inst *qemu.Instance, cfg qemu.
 	if err := inst.Stop(); err != nil {
 		return fmt.Errorf("stop build vm for kernel args: %w", err)
 	}
+	// The host can release the old QEMU's ssh forward port shortly after
+	// the process is gone; restarting before then fails the hostfwd bind.
+	if err := waitTCPPortFree(r.port, 15*time.Second); err != nil {
+		return fmt.Errorf("restart build vm for kernel args: %w", err)
+	}
 	inst.Cfg = cfg
 	if err := inst.Start(); err != nil {
 		return fmt.Errorf("restart build vm for kernel args: %w", err)
@@ -370,6 +376,21 @@ func applyKernelArgs(out io.Writer, r *sshRunner, inst *qemu.Instance, cfg qemu.
 		}
 	}
 	return nil
+}
+
+func waitTCPPortFree(port int, timeout time.Duration) error {
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	deadline := time.Now().Add(timeout)
+	for {
+		l, err := net.Listen("tcp", addr)
+		if err == nil {
+			return l.Close()
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("ssh port %d still in use after %s: %v", port, timeout, err)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
 }
 
 // guestPanicNote returns the guest kernel's panic line from the console
