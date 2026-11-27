@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "repo": "BitterOrange/pvm-qemu",
+  "workflow": "BitterOrange/pvm-qemu/.github/workflows/release.yml",
+  "recommended": {
+    "darwin-arm64": "11.1.3-pvm1",
+    "linux-amd64": "11.1.3-pvm1",
+    "windows-amd64": "11.1.3-pvm1"
+  },
+  "builds": {
+    "11.1.3-pvm1": {
+      "hosts": {
+        "darwin-arm64": {
+          "asset": "pvm-qemu-11.1.3-pvm1-darwin-arm64.tar.gz",
+          "sha256": "d12d2ad04e87ba63216e2dc8f0dbd896b197b0ec0feb4a85e905d542e37e729d",
+          "size": 11658319,
+          "tree_sha256": "8a88d5d8c082231d3e784ce92842e428aa125b8dda34a833c06f2686425e16ba",
+          "system_sha256": "2169c057bbe71a45491276b839e0a057d1ea4e6e486e0750a3c0026032e2f04c"
+        },
+        "linux-amd64": {
+          "asset": "pvm-qemu-11.1.3-pvm1-linux-amd64.tar.gz",
+          "sha256": "61bb935b6485834201a63f204c994560f8ef8bad0f2a45659d3a446c5630b024",
+          "size": 16553518,
+          "tree_sha256": "339f55a1ed42fc9eb15ee3fe1f35a5105c0e685bba1369d3d2d202bd42da80e8",
+          "system_sha256": "87e41fb7a8c523d92d6d508e5b984199004330e1b50634a4cf7cd64d83e5974b"
+        },
+        "windows-amd64": {
+          "asset": "pvm-qemu-11.1.3-pvm1-windows-amd64.tar.gz",
+          "sha256": "c4b1890aa5ab4b590cf8a67bfe1e6753c8a57c179b02b9d78b35ac37e1dc9527",
+          "size": 14565393,
+          "tree_sha256": "306038ced258b0a2a93452cbff43eec5bd570702fae0f566a4b90751fc8dfa80",
+          "system_sha256": "166793d73c1bd5acb9c1253c7d6e7ea5b81b22f807d02991f888c0ca84e8a58d"
+        }
+      }
+    }
+  },
+  "revoked": {}
+}

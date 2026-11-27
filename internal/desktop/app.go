@@ -20,6 +20,7 @@ import (
 	"github.com/huangzheng2016/pvm/internal/cli"
 	"github.com/huangzheng2016/pvm/internal/daemon"
 	"github.com/huangzheng2016/pvm/internal/paths"
+	"github.com/huangzheng2016/pvm/internal/qemu"
 )
 
 const (
@@ -54,6 +55,9 @@ type Options struct {
 	Emit func(event string, data any)
 	// PickFolder shows a folder dialog and returns "" when cancelled.
 	PickFolder func() (string, error)
+	// PickFile shows a file dialog for files matching pattern and returns
+	// "" when cancelled.
+	PickFile func(title, pattern string) (string, error)
 }
 
 // App is bound to the frontend as window.go.desktop.App. Every exported
@@ -66,6 +70,11 @@ type App struct {
 	emit    func(event string, data any)
 	pick    func() (string, error)
 	backend func() (string, error)
+
+	pickFile       func(title, pattern string) (string, error)
+	detectOfficial func() (*qemu.Official, error)
+	officialMu     sync.Mutex
+	officialCache  *QEMUOfficial
 
 	followTimeout time.Duration
 	pollInterval  time.Duration
@@ -81,17 +90,19 @@ type App struct {
 
 func New(p *paths.Paths, o Options) *App {
 	return &App{
-		p:             p,
-		daemon:        clientReader{daemon.NewClient(p)},
-		run:           pvmRunner{find: pvmPath},
-		sys:           hostSystem(),
-		emit:          o.Emit,
-		pick:          o.PickFolder,
-		backend:       func() (string, error) { return cli.ResolveWindowsBackend(p) },
-		followTimeout: followTimeout,
-		pollInterval:  pollInterval,
-		lostTimeout:   lostTimeout,
-		running:       map[int64]string{},
+		p:              p,
+		daemon:         clientReader{daemon.NewClient(p)},
+		run:            pvmRunner{find: pvmPath},
+		sys:            hostSystem(),
+		emit:           o.Emit,
+		pick:           o.PickFolder,
+		pickFile:       o.PickFile,
+		detectOfficial: qemu.DetectOfficial,
+		backend:        func() (string, error) { return cli.ResolveWindowsBackend(p) },
+		followTimeout:  followTimeout,
+		pollInterval:   pollInterval,
+		lostTimeout:    lostTimeout,
+		running:        map[int64]string{},
 	}
 }
 
@@ -171,7 +182,22 @@ type State struct {
 	DataDir     string `json:"data_dir"`
 	// HostCPUs is the host's logical processors: the most vcpus the
 	// forms offer for one VM.
-	HostCPUs int `json:"host_cpus"`
+	HostCPUs int       `json:"host_cpus"`
+	QEMU     QEMUState `json:"qemu"`
+	// Marker tells pvm.exe that this PVM Desktop can set up QEMU builds.
+	Marker string `json:"marker"`
+}
+
+// daemonStatus is the part of /v1/status the app reads.
+type daemonStatus struct {
+	Version         string   `json:"version"`
+	Accel           string   `json:"accel"`
+	TCGFallback     int      `json:"tcg_fallback"`
+	QEMUProblems    []string `json:"qemu_problems"`
+	BlockedClusters []struct {
+		Cluster int    `json:"cluster"`
+		Reason  string `json:"reason"`
+	} `json:"blocked_clusters"`
 }
 
 // State works under every backend; it is how the page learns that the
@@ -181,25 +207,24 @@ func (a *App) State() (State, error) {
 	if err != nil {
 		return State{}, err
 	}
-	st := State{Backend: backend, AppVersion: buildinfo.Version, DataDir: a.p.Home, HostCPUs: runtime.NumCPU()}
+	st := State{Backend: backend, AppVersion: buildinfo.Version, DataDir: a.p.Home, HostCPUs: runtime.NumCPU(), Marker: buildinfo.DesktopQEMUMarker}
 	if backend != "native" {
+		st.QEMU = a.readQEMU(nil)
 		return st, nil
 	}
 	if _, err := os.Stat(a.p.DaemonStopMark()); err == nil {
 		st.DaemonStopped = true
 	}
 	if !a.daemon.Healthy() {
+		st.QEMU = a.readQEMU(nil)
 		return st, nil
 	}
 	st.DaemonHealthy = true
-	var status struct {
-		Version     string `json:"version"`
-		Accel       string `json:"accel"`
-		TCGFallback int    `json:"tcg_fallback"`
-	}
+	var status daemonStatus
 	if err := a.daemon.Get("/v1/status", &status); err != nil {
 		return State{}, fmt.Errorf("daemon status: %w", err)
 	}
 	st.DaemonVersion, st.Accel, st.TCGFallback = status.Version, status.Accel, status.TCGFallback
+	st.QEMU = a.readQEMU(&status)
 	return st, nil
 }

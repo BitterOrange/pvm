@@ -8,6 +8,7 @@ import (
 	"debug/buildinfo"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,6 +24,7 @@ import (
 	"github.com/huangzheng2016/pvm/internal/daemon"
 	"github.com/huangzheng2016/pvm/internal/fsutil"
 	"github.com/huangzheng2016/pvm/internal/paths"
+	"github.com/huangzheng2016/pvm/internal/qemu"
 )
 
 const upgradeRepo = "BitterOrange/pvm"
@@ -98,7 +100,9 @@ func CmdUpgrade(args []string) int {
 	if err != nil {
 		return fatalf("%v", err)
 	}
-	client := &http.Client{Timeout: 30 * time.Second}
+	// No total timeout: a slow link must still finish; a stalled server
+	// fails on the header timeout.
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, ResponseHeaderTimeout: 30 * time.Second}}
 	tag := *to
 	if tag == "" {
 		tag, err = latestReleaseTag(client)
@@ -108,6 +112,9 @@ func CmdUpgrade(args []string) int {
 	}
 	if !releaseTagPattern.MatchString(tag) {
 		return fatalf("invalid release tag")
+	}
+	if tagBelow(tag, [3]int{1, 4, 0}) {
+		return fatalf("pvm v1.4+ cannot install %s with --to; use pvm upgrade --rollback -y, or that version's installer", tag)
 	}
 	cur := pvmBuildinfo.Version
 	fmt.Printf("current: %s, target: %s\n", cur, tag)
@@ -165,6 +172,9 @@ func CmdUpgrade(args []string) int {
 	if err := validateUpgradeBinary(bin, tag); err != nil {
 		return fatalf("validate release: %v", err)
 	}
+	if err := checkStagedQEMU(bin, tag); err != nil {
+		return fatalf("%v", err)
+	}
 	data, err := os.ReadFile(bin)
 	if err != nil || len(data) == 0 {
 		return fatalf("read extracted binary: %v (refusing to replace %s)", err, exe)
@@ -183,29 +193,15 @@ func CmdUpgrade(args []string) int {
 	}
 	binarySHA := sha256.Sum256(oldBinary)
 	state.SHA256 = hex.EncodeToString(binarySHA[:])
-	qemuUpdate, err := prepareQEMUUpgrade(client, tag, tmp, state.SHA256)
-	if err != nil {
-		return fatalf("prepare QEMU runtime: %v", err)
-	}
-	if qemuUpdate != nil {
-		defer os.RemoveAll(qemuUpdate.stageRoot)
-		state.QEMUArch = qemuUpdate.arch
-		state.QEMUBackup = qemuUpdate.backup
-		state.QEMUHadPrevious = qemuUpdate.hadPrevious
-		state.QEMUCurrent = qemuUpdate.current
-		state.QEMUVersion = qemuUpdate.previousVersion
-	}
+	// pvm upgrade never changes QEMU: builds are managed with pvm qemu.
 	if err := saveUpgradeRecovery(exe, state); err != nil {
 		return fatalf("save rollback: %v", err)
 	}
-	if err := prepareDaemonForRuntimeChange(runtime.GOOS, daemonRunning, anyRunning, *noRestart, qemuUpdate != nil, func() int { return CmdDaemon([]string{"stop"}) }); err != nil {
+	if err := prepareDaemonForRuntimeChange(runtime.GOOS, daemonRunning, anyRunning, *noRestart, false, func() int { return CmdDaemon([]string{"stop"}) }); err != nil {
 		return fatalf("%v", err)
 	}
 	if err := replaceBinary(exe, data); err != nil {
 		return fatalf("replace %s: %v", exe, err)
-	}
-	if err := qemuUpdate.Activate(); err != nil {
-		return fatalf("activate QEMU runtime: %v; run `pvm upgrade --rollback -y` to restore both components", err)
 	}
 	if *noRestart {
 		fmt.Printf("upgraded to %s; restart the daemon to use it: pvm daemon restart; rollback: pvm upgrade --rollback -y\n", tag)
@@ -485,4 +481,72 @@ func untarSingle(arcPath, wantName, dst string) error {
 		}
 		return out.Close()
 	}
+}
+
+// tagBelow reports whether release tag v is older than min.
+func tagBelow(tag string, min [3]int) bool {
+	var v [3]int
+	if _, err := fmt.Sscanf(strings.TrimPrefix(tag, "v"), "%d.%d.%d", &v[0], &v[1], &v[2]); err != nil {
+		return false
+	}
+	for i := range v {
+		if v[i] != min[i] {
+			return v[i] < min[i]
+		}
+	}
+	return false
+}
+
+// checkStagedQEMU asks the new pvm whether it accepts the current default
+// QEMU before anything is replaced, so an upgrade whose checks reject the
+// build stops with nothing changed. Exit 3 (no QEMU set up yet) is only a
+// hint; anything else but 0 aborts.
+func checkStagedQEMU(bin, tag string) error {
+	// Under the WSL2 backend the QEMU that matters is the one inside WSL.
+	if runtime.GOOS == "windows" {
+		if p, err := paths.Default(); err == nil {
+			if backend, err := ResolveWindowsBackend(p); err == nil && backend == "wsl" {
+				return nil
+			}
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "qemu", "check", "--default", "--read-only")
+	cmd.Env = append(os.Environ(), "PVM_BACKEND=native")
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return fmt.Errorf("pvm %s did not finish checking the current QEMU in 60 s; nothing was changed", tag)
+	}
+	var exit *exec.ExitError
+	switch {
+	case err == nil:
+		noteRecommendedQEMU(bin, tag)
+		return nil
+	case errors.As(err, &exit) && exit.ExitCode() == 3:
+		fmt.Printf("note: no QEMU is set up yet; after the upgrade run pvm qemu install\n")
+		return nil
+	}
+	return fmt.Errorf("pvm %s does not accept the current default QEMU: %s; install a build it accepts first (pvm qemu ls), then upgrade; nothing was changed", tag, strings.TrimSpace(string(out)))
+}
+
+// noteRecommendedQEMU says when the new pvm recommends another project
+// build than the default. pvm upgrade never switches builds itself.
+func noteRecommendedQEMU(bin, tag string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "qemu", "ls", "--json")
+	cmd.Env = append(os.Environ(), "PVM_BACKEND=native")
+	out, err := cmd.Output()
+	if err != nil {
+		return
+	}
+	var l struct {
+		Default     string `json:"default"`
+		Recommended string `json:"recommended"`
+	}
+	if json.Unmarshal(out, &l) != nil || l.Recommended == "" || l.Default == l.Recommended || !qemu.ValidTag(l.Default) {
+		return
+	}
+	fmt.Printf("pvm %s recommends QEMU %s; to use it after the upgrade: pvm qemu install %s --use\n", tag, l.Recommended, l.Recommended)
 }

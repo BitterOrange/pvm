@@ -146,6 +146,48 @@ export const en = {
     ],
     missingText: "PVM Desktop reads VMs and exits from the daemon. The output of the start is in Activity below.",
     start: "Start the daemon",
+    setUpQemu: "Set up QEMU for Windows",
+  },
+
+  qemu: {
+    title: "Set up QEMU",
+    working: "Setting up QEMU...",
+    text: "pvm runs every VM in QEMU. Choose where yours comes from, once; Settings can change it later.",
+    wslNote: (command: Node): Part[] => [
+      "Setting up QEMU here moves PVM Desktop to the native Windows backend. VMs in WSL stay reachable with ",
+      command,
+      ".",
+    ],
+    recommended: "recommended",
+    projectTitle: "QEMU built by pvm",
+    projectText: (mb: number) =>
+      "Built from the signed upstream QEMU source by the pvm-qemu project and checked against this pvm release." +
+      (mb > 0 ? " About " + mb + " MB." : "") +
+      " Needs no administrator rights.",
+    noPin: "This pvm pins no QEMU build for this computer. Use QEMU from MSYS2 UCRT64 instead.",
+    install: "Install",
+    installNamed: (id: string) => "Install " + id,
+    fromFile: "Install from file",
+    officialText: "The QEMU for Windows that qemu.org links to, installed and updated with the MSYS2 package manager.",
+    found: (version: string) => "Found version " + version + " at",
+    notFound: "Not installed. In an MSYS2 UCRT64 shell run:",
+    useOfficial: "Use QEMU from MSYS2",
+    openDownloads: "Open qemu.org downloads",
+    checkAgain: "Check again",
+    tryAgain: "Try again",
+    pacHint: "pvm cannot follow a proxy that only has an auto-config (PAC) script. Download the archive with a browser and install it from the file.",
+    back: "Back",
+    notice: "pvm-qemu builds are not official QEMU releases, and the project is not affiliated with the QEMU project. QEMU is a trademark of Fabrice Bellard.",
+    isDefault: "default",
+    use: "Use",
+    remove: "Remove",
+    removeTitle: (id: string) => "Remove QEMU " + id + "?",
+    removeProject: "Its files are deleted. VMs that run on it keep running until they stop.",
+    removeOfficial: "pvm stops using it. MSYS2 keeps it installed.",
+    no9p: "No virtio-9p: host folders can be mounted only in WSL2 mode.",
+    withdrawn: (reason: string) => "Withdrawn by this pvm release: " + reason,
+    label: "QEMU",
+    none: "none set up",
   },
 
   vms: {

@@ -15,3 +15,15 @@ func DefaultMemMB() int {
 	}
 	return mb
 }
+
+// PCIRootPorts is how many PCIe root ports a VM on this host can have.
+// Every root port takes a PCI bus, and QEMU's virt machine on an Apple
+// hypervisor with a small guest address space (the M1's is 36 bits) has to
+// keep its ECAM window below 4 GiB, where it holds 16 buses: bus 0 and 15
+// root ports. Elsewhere the ECAM window has 256 buses.
+func PCIRootPorts() int {
+	if smallECAM() {
+		return 15
+	}
+	return 64
+}

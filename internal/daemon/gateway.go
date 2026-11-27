@@ -263,16 +263,20 @@ func (s *Server) createGatewayVM(cl *cluster.Cluster) (*vm.Spec, error) {
 	if base == "" {
 		return nil, fmt.Errorf("gateway needs an ubuntu base image; run `pvm image fetch ubuntu:26.04`")
 	}
+	tc, accel, err := s.qemu()
+	if err != nil {
+		return nil, err
+	}
 	spec := &vm.Spec{
 		Name: cl.Gateway, Image: imgSpec, Role: "gateway",
 		User: "pvmgw", GuestUID: vm.HostUID(),
 		// Current Ubuntu initramfs decompression exceeds a 512 MiB guest.
 		CPUs: 1, MemMB: 1024, DiskGB: 10,
 		SSHPort: port, BaseDisk: base, ClusterID: cl.ID,
-		KernelArgs: s.Accel.GuestKernelArgs(),
+		KernelArgs: accel.GuestKernelArgs(),
 	}
 	spec.KernelArgsPending = spec.KernelArgs != ""
-	if err := vm.Create(s.P, s.TC, spec); err != nil {
+	if err := vm.Create(s.P, tc, spec); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()

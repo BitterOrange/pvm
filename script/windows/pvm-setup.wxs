@@ -33,9 +33,15 @@
     <Property Id="PVMHOME">
       <RegistrySearch Id="RecordedPvmHome" Root="HKCU" Key="Software\pvm\msi" Name="PvmHome" Type="raw"/>
     </Property>
+    <!-- The NSIS setup installs into the same folder; mixing the two leaves
+         two entries in Apps, and removing either one breaks the other. -->
+    <Property Id="NSISINSTALL">
+      <RegistrySearch Id="NsisInstall" Root="HKCU" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\pvm" Name="UninstallString" Type="raw"/>
+    </Property>
+    <Condition Message="pvm was installed with the .exe setup. Uninstall it in Settings &gt; Apps first (your VMs are kept), then run this installer again, or update with the .exe setup.">Installed OR NOT NSISINSTALL</Condition>
     <CustomAction Id="SetPvmHomeEnv" Property="PVMHOME" Value="[%PVM_HOME]"/>
     <CustomAction Id="SetPvmHomeProfile" Property="PVMHOME" Value="[%USERPROFILE]\.pvm"/>
-    <CustomAction Id="SetRuntimeDir" Property="RUNTIMEDIR" Value="[PVMHOME]\runtime\qemu\x86_64\"/>
+    <CustomAction Id="SetRuntimeDir" Property="RUNTIMEDIR" Value="[PVMHOME]\runtime\qemu\msi-payload\x86_64\"/>
     <CustomAction Id="SetPowerShell" Property="POWERSHELL" Value="[System64Folder]WindowsPowerShell\v1.0\powershell.exe"/>
 
     <!-- Replacing files under a running daemon or VM would defer them to the
@@ -47,11 +53,11 @@
          Apps uninstalls, /qb), which skips that sequence, in the execute
          sequence. Silent runs (/qn) only check and refuse. -->
     <CustomAction Id="StopRunningUI" Property="POWERSHELL" Execute="immediate" Return="check"
-                  ExeCommand="-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command &quot;&amp; ([\[]scriptblock[\]]::Create([\[]Text.Encoding[\]]::UTF8.GetString([\[]Convert[\]]::FromBase64String('$(var.RunningPs1B64)')))) -InstallDir '[INSTALLDIR].' -RuntimeDir '[RUNTIMEDIR].' -Mode prompt; exit $$LASTEXITCODE&quot;"/>
+                  ExeCommand="-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command &quot;&amp; ([\[]scriptblock[\]]::Create([\[]Text.Encoding[\]]::UTF8.GetString([\[]Convert[\]]::FromBase64String('$(var.RunningPs1B64)')))) -InstallDir '[INSTALLDIR].' -PvmHome '[PVMHOME]' -Mode prompt; exit $$LASTEXITCODE&quot;"/>
     <CustomAction Id="StopRunningBasicUI" Property="POWERSHELL" Execute="immediate" Return="check"
-                  ExeCommand="-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command &quot;&amp; ([\[]scriptblock[\]]::Create([\[]Text.Encoding[\]]::UTF8.GetString([\[]Convert[\]]::FromBase64String('$(var.RunningPs1B64)')))) -InstallDir '[INSTALLDIR].' -RuntimeDir '[RUNTIMEDIR].' -Mode prompt; exit $$LASTEXITCODE&quot;"/>
+                  ExeCommand="-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command &quot;&amp; ([\[]scriptblock[\]]::Create([\[]Text.Encoding[\]]::UTF8.GetString([\[]Convert[\]]::FromBase64String('$(var.RunningPs1B64)')))) -InstallDir '[INSTALLDIR].' -PvmHome '[PVMHOME]' -Mode prompt; exit $$LASTEXITCODE&quot;"/>
     <CustomAction Id="CheckNotRunning" Property="POWERSHELL" Execute="immediate" Return="check"
-                  ExeCommand="-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command &quot;&amp; ([\[]scriptblock[\]]::Create([\[]Text.Encoding[\]]::UTF8.GetString([\[]Convert[\]]::FromBase64String('$(var.RunningPs1B64)')))) -InstallDir '[INSTALLDIR].' -RuntimeDir '[RUNTIMEDIR].' -Mode check; exit $$LASTEXITCODE&quot;"/>
+                  ExeCommand="-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command &quot;&amp; ([\[]scriptblock[\]]::Create([\[]Text.Encoding[\]]::UTF8.GetString([\[]Convert[\]]::FromBase64String('$(var.RunningPs1B64)')))) -InstallDir '[INSTALLDIR].' -PvmHome '[PVMHOME]' -Mode check; exit $$LASTEXITCODE&quot;"/>
     <!-- "[INSTALLDIR]." avoids a trailing '\"' that would escape the quote. -->
     <CustomAction Id="AddUserPath" Property="POWERSHELL" Execute="deferred" Impersonate="yes" Return="check"
                   ExeCommand="-NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLDIR]user-path.ps1&quot; -Action add -Dir &quot;[INSTALLDIR].&quot;"/>
@@ -94,7 +100,12 @@
           <Directory Id="XPRADIR" Name="xpra"/>
         </Directory>
       </Directory>
-      <!-- Placeholder; SetRuntimeDir redirects it to [PVMHOME]\runtime\qemu\x86_64. -->
+      <!-- Placeholder; SetRuntimeDir redirects it to [PVMHOME]\runtime\qemu\msi-payload\x86_64.
+           The pinned pvm-qemu build goes into a folder of its own, with
+           component GUIDs of its own: an upgrade from v1.3.x removes the old
+           runtime as files that MSI placed, instead of costing same-version
+           DLLs as present and leaving a mixed tree. pvm takes the payload
+           over into runtime\qemu\builds when its daemon next starts. -->
       <Directory Id="RUNTIMEDIR" Name="pvm-runtime"/>
       <Directory Id="ProgramMenuFolder"/>
     </Directory>

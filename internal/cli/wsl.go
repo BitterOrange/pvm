@@ -43,10 +43,11 @@ func ResolveWindowsBackend(p *paths.Paths) (string, error) {
 		if p != nil && daemon.NewClient(p).Healthy() {
 			return "native", nil
 		}
-		if p != nil {
-			if _, err := qemu.Find(p.Runtime); err == nil {
-				return "native", nil
-			}
+		// A native QEMU build set up (or an older pvm's one waiting to be
+		// taken over) makes native the choice; a QEMU merely installed
+		// somewhere does not.
+		if p != nil && qemu.Ready(p) {
+			return "native", nil
 		}
 		if wslHasPVM() {
 			return "wsl", nil
@@ -257,7 +258,7 @@ func windowsDoctorChecks(p *paths.Paths) []auditCheck {
 		checks = append(checks, auditCheck{"windows_ssh", "ok", "OpenSSH client available"})
 	}
 
-	tc, tcErr := qemu.Find(p.Runtime)
+	tc, tcErr := qemu.Resolve(p)
 	wslOK := wslHasPVM()
 	switch {
 	case tcErr == nil:
@@ -270,7 +271,7 @@ func windowsDoctorChecks(p *paths.Paths) []auditCheck {
 	case wslOK:
 		checks = append(checks, auditCheck{"windows_accel", "ok", "WSL2 pvm backend available"})
 	default:
-		checks = append(checks, auditCheck{"windows_accel", "warn", "neither native QEMU nor WSL2 pvm found; install QEMU or WSL2"})
+		checks = append(checks, auditCheck{"windows_accel", "warn", "neither a native QEMU build nor WSL2 pvm found: " + tcErr.Error()})
 	}
 	return checks
 }

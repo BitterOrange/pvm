@@ -100,8 +100,13 @@ func (s *Server) handleResize(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.SizeGB != 0 {
+		tc, _, qerr := s.qemu()
+		if qerr != nil {
+			writeErr(w, 409, qerr)
+			return
+		}
 		disk := qemu.ActiveDisk(vmDir, spec.Disk(s.P))
-		out, err := exec.Command(s.TC.Img, "info", "--output=json", disk).CombinedOutput()
+		out, err := exec.Command(tc.Img, "info", "--output=json", disk).CombinedOutput()
 		if err != nil {
 			writeErr(w, 500, fmt.Errorf("inspect active disk: %v\n%s", err, out))
 			return
@@ -119,7 +124,7 @@ func (s *Server) handleResize(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if requestedBytes > info.VirtualSize {
-			out, err = exec.Command(s.TC.Img, "resize", disk, fmt.Sprintf("%dG", req.SizeGB)).CombinedOutput()
+			out, err = exec.Command(tc.Img, "resize", disk, fmt.Sprintf("%dG", req.SizeGB)).CombinedOutput()
 			if err != nil {
 				writeErr(w, 500, fmt.Errorf("qemu-img resize: %v\n%s", err, out))
 				return

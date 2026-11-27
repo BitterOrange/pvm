@@ -5,21 +5,21 @@ description: Create and manage isolated Linux dev VMs with pvm, and route all of
 
 # pvm: isolated dev VMs and egress control
 
-pvm is a QEMU virtual machine system for the local machine (single Go binary). A daemon runs permanently; the CLI auto-spawns it when needed (exception: after an explicit `pvm daemon stop` it stays down until `pvm daemon start`). Everything goes through the `pvm` command — never touch QEMU directly.
+pvm is a QEMU virtual machine system for the local machine (single Go binary). A daemon runs permanently; the CLI auto-spawns it when needed (exception: after an explicit `pvm daemon stop` it stays down until `pvm daemon start`). Everything goes through the `pvm` command — never run or touch QEMU directly; manage the QEMU pvm runs only with `pvm qemu` (see QEMU builds below).
 
 For security boundaries, credential handling, isolation risks, and verification, run `pvm security`.
 
 ## Architecture boundary
 
-pvm supports only the host's native architecture: darwin/arm64 runs arm64 VMs, linux/amd64 and windows/amd64 run amd64 VMs. On Windows, pvm supports both delegating to a WSL2 Linux pvm instance (`PVM_BACKEND=wsl`) and running native Windows QEMU with WHPX (`PVM_BACKEND=native`, or `auto`). Build artifacts contain guest binaries and the QEMU runtime for the current host architecture only — no cross-arch emulation or packages.
+pvm supports only the host's native architecture: darwin/arm64 runs arm64 VMs, linux/amd64 and windows/amd64 run amd64 VMs. On Windows, pvm supports both delegating to a WSL2 Linux pvm instance (`PVM_BACKEND=wsl`) and running native Windows QEMU with WHPX (`PVM_BACKEND=native`, or `auto`). Build artifacts contain guest binaries for the current host architecture only — no cross-arch emulation or packages — and no QEMU: pvm runs the QEMU build set up with `pvm qemu`.
 
 ### Windows hosts
 
 - `PVM_BACKEND=wsl` delegates commands to `pvm` in WSL2 and is the recommended mode for full `/share`, extra mounts, and KVM where available. `pvm mount` converts a Windows source such as `C:\work\proj` to `/mnt/c/work/proj` before delegation.
 - `PVM_BACKEND=native` runs a Windows daemon on loopback TCP. All daemon APIs except `/v1/health` require the bearer token stored in `~/.pvm/run/admin.token`. `pvm daemon install` uses a Scheduled Task.
-- Native Windows QEMU does not provide virtio-9p. `create` therefore uses `--share none` and prints a warning; explicitly requesting `private` or `global` fails with guidance to use WSL2. Use WSL2 when host/guest file sharing is required.
-- Native mode uses WHPX only when Windows Hypervisor Platform is enabled and its probe succeeds. Otherwise it uses TCG and reports the fallback. `PVM_QEMU_ACCEL=whpx` forces a WHPX attempt; `PVM_QEMU_ACCEL=tcg` forces emulation. When `create`, `start`, `clone`, or `image build` detects TCG, pvm prints backend-specific acceleration guidance. To enable WSL2 nested virtualization, set `nestedVirtualization=true` under `[wsl2]` in `%UserProfile%\.wslconfig`, run `wsl --shutdown`, restart WSL, and verify `/dev/kvm`. Explicitly setting `PVM_QEMU_ACCEL=tcg` suppresses the warning. Native Windows resolves through DNS-over-TCP to avoid Windows QEMU UDP DNS failures. Set `PVM_DNS_UPSTREAM` to override the upstream (for example `tcp://192.0.2.53:53`); Linux and WSL2 retain the default slirp resolver.
-- `PVM_BACKEND=auto` is the default and chooses a running native daemon or native QEMU first, then WSL2 if pvm is installed there. Run `pvm doctor` to inspect backend, OpenSSH, QEMU, WSL2, and acceleration readiness.
+- No QEMU for Windows provides virtio-9p (neither the pvm-qemu build nor MSYS2's); `pvm qemu ls` shows it per build. `create` therefore uses `--share none` and prints a warning; explicitly requesting `private` or `global` fails with guidance to use WSL2. Use WSL2 when host/guest file sharing is required.
+- Native mode uses WHPX only when Windows Hypervisor Platform is enabled and its probe succeeds. Otherwise it uses TCG and reports the fallback. `PVM_QEMU_ACCEL=whpx` forces a WHPX attempt; `PVM_QEMU_ACCEL=tcg` forces emulation. It applies only to a build that passed its checks, and `pvm daemon status` marks it as forced. When `create`, `start`, `clone`, or `image build` detects TCG, pvm prints backend-specific acceleration guidance. To enable WSL2 nested virtualization, set `nestedVirtualization=true` under `[wsl2]` in `%UserProfile%\.wslconfig`, run `wsl --shutdown`, restart WSL, and verify `/dev/kvm`. Explicitly setting `PVM_QEMU_ACCEL=tcg` suppresses the warning. Native Windows resolves through DNS-over-TCP to avoid Windows QEMU UDP DNS failures. Set `PVM_DNS_UPSTREAM` to override the upstream (for example `tcp://192.0.2.53:53`); Linux and WSL2 retain the default slirp resolver.
+- `PVM_BACKEND=auto` is the default and chooses native when a native daemon is healthy or a native QEMU build is set up (or one from an older pvm waits to be taken over), then WSL2 if pvm is installed there, else native. A detected but unregistered MSYS2 QEMU does not count. To set up native QEMU while auto picks WSL2, run `PVM_BACKEND=native pvm qemu install` (or `PVM_BACKEND=native pvm qemu use official`); `pvm qemu` otherwise follows the backend like every VM command. Run `pvm doctor` to inspect backend, OpenSSH, QEMU, WSL2, and acceleration readiness.
 
 ## Prerequisites
 
@@ -276,16 +276,44 @@ pvm daemon status
 pvm daemon stop && pvm daemon start
 ```
 
-- Native Windows (WHPX) has no RAM snapshots: QEMU blocks migration of WHPX VMs, so `pvm snapshot create` fails there with "State blocked due to missing dirty memory tracking support". Use the WSL2 backend when you need them.
+- Native Windows (WHPX) has no RAM snapshots with any QEMU build: QEMU blocks migration of WHPX VMs, so `pvm snapshot create` refuses up front with "native Windows has no RAM snapshots: QEMU blocks migration of WHPX VMs (missing dirty memory tracking support); use the WSL2 backend for snapshots".
+- A snapshot restores only into the QEMU build (build id and qemu-system SHA-256) and CPU arguments that wrote it; see QEMU builds below.
 - Snapshots suit machines left unused for days, or a checkpoint before risky operations. Existing snapshot artifacts are not overwritten implicitly. After a restore, the active restore overlay and any `.bak` hold VM data: snapshot removal or another snapshot is refused. Clone the stopped VM to flatten its current disk before creating a new checkpoint; do not manually delete backing files.
 - `pvm doctor`, `pvm audit dev1 --privacy`, and `pvm route explain dev1 example.com` inspect local state without network probes or starting the daemon; output is redacted. Route explanations describe configuration, not observed traffic, and do not resolve DNS.
 - Automatic update checks are off; opt in with `update_check: true` in config.yaml or `PVM_UPDATE_CHECK=1`. `PVM_NO_UPDATE_CHECK=1` overrides either. Failed checks are also cached for 24 hours.
-- The Windows installers also place PVM Desktop (`pvm-desktop.exe`), a window for people over the same commands. Agents keep using the CLI; `pvm upgrade` does not update the app.
-- Installer and `pvm upgrade` require GitHub CLI (`gh`) for release attestation verification; the installer also requires Python 3. `pvm upgrade --rollback` restores the saved binary and VM recovery plan.
-- Restarting the daemon stops user VMs (the gateway recovers automatically); start them again with `pvm start <name>`. `pvm upgrade` does this restart and restores previously running user VMs automatically; use `--no-restart` only when you want to handle that lifecycle yourself. On Windows, `--no-restart` requires all VMs stopped when upgrading QEMU; otherwise pvm stops the daemon before replacing the runtime and restores the recorded VM plan. `pvm upgrade --rollback` restores the saved binary, QEMU runtime, and VM recovery plan.
+- The Windows installers also place PVM Desktop (`pvm-desktop.exe`), a window for people over the same commands. Agents keep using the CLI. `pvm upgrade` changes neither QEMU nor PVM Desktop; rerun the installer to update the app.
+- Installer and `pvm upgrade` require GitHub CLI (`gh`) for release attestation verification; the installer also requires Python 3. `pvm upgrade --rollback` restores the saved binary and VM recovery plan, and, only when rolling back to a v1.3.x recovery point, that version's QEMU runtime folder. `pvm upgrade --to` refuses tags below v1.4.0; use `pvm upgrade --rollback -y` or that version's installer. After validating the new binary, `pvm upgrade` checks that it accepts the current default QEMU (`pvm qemu check --default --read-only`, native backend only) and aborts before replacing anything if it does not; with no QEMU set up it only prints the setup hint.
+- Restarting the daemon stops user VMs (the gateway recovers automatically); start them again with `pvm start <name>`. `pvm upgrade` does this restart and restores previously running user VMs automatically; use `--no-restart` only when you want to handle that lifecycle yourself, then run `pvm daemon restart`.
 - If the gateway pvm-gw1 spins at high CPU with SSH unreachable for a long time, recover with `pvm stop pvm-gw1 && pvm start pvm-gw1`. Never delete pvm-gw1 (the daemon recreates it, but cluster networking is down and custom state is lost in the meantime).
 - The daemon holds a single-instance lock; on `another pvm daemon is already running`, find the existing daemon instead of spawning a second one.
 - A boot watchdog restarts a VM only after two consecutive checks show full CPU with zero console progress; slow TCG boots are left alone.
+
+## QEMU builds
+
+pvm runs QEMU only from the build selected with `pvm qemu`, by absolute path; it never searches PATH, `/usr/local` or Program Files, and never switches builds on its own. Builds sit side by side and one is the default. There are two sources:
+
+- **Project build**: QEMU built from the signed upstream source by the pvm-qemu project, pinned by digest in this pvm release. It is installed into `~/.pvm/runtime/qemu/builds/<tag>/<arch>` and needs no administrator rights or `gh`.
+- **Official build**: your platform's own channel, installed by you. macOS: Homebrew under `/opt/homebrew` (`brew install qemu`). Linux: your distribution's packages in `/usr/bin` (Debian, Ubuntu, Fedora, Arch; 8.2.0 or newer; RHEL's `qemu-kvm` is not accepted), for example `sudo apt install qemu-system-x86 qemu-utils`. Windows: MSYS2 UCRT64 (`pacman -S mingw-w64-ucrt-x86_64-qemu` in a UCRT64 shell). pvm detects and checks it, but never runs a package manager or downloads it.
+
+```bash
+pvm qemu                               # same as pvm qemu ls: builds, default, recommended pin, leftovers (--json)
+pvm qemu install -y                    # the recommended project build; the first build becomes the default
+pvm qemu install 11.1.3-pvm1 --use -y  # a given tag, made the default
+pvm qemu install --file pvm-qemu-11.1.3-pvm1-linux-amd64.tar.gz -y   # offline: must match a pinned digest
+pvm qemu use official -y               # Homebrew, your distribution's QEMU, or MSYS2 UCRT64
+pvm qemu use 11.1.3-pvm1 -y            # switch the default back
+pvm qemu check --default               # exit 0 ok, 3 not set up, 1 failing, 2 usage
+pvm qemu rm 11.1.3-pvm1 -y             # refuses the default and builds running VMs use; rm official only unregisters
+pvm qemu gc -y                         # remove staging, trash and folders left by older pvm versions
+```
+
+- `install`, `rm` and `gc` ask at a terminal and need `-y` otherwise. A tag this pvm does not pin needs `--unpinned` and the GitHub CLI (`gh`) to verify its attestation.
+- Downloads resume and honour `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY`, and on Windows the static system proxy. A proxy script (PAC) cannot be read: set `HTTPS_PROXY`, or download the archive and use `--file`.
+- Every build passes a minimum version per host (macOS and Windows 11.1.0, Linux 8.2.0), accelerator and device probes, a test start with pvm's arguments and a firmware check (on macOS also the hypervisor entitlement) before it is registered and again whenever its binary changes. A project build whose files changed is refused; an official build that a package manager upgraded is checked again. Errors name the next command; do not work around them by running QEMU yourself.
+- The daemon runs without QEMU: `pvm ls`, `rm`, `snapshot rm`, `exit` and `route` work, while create, start, clone, compact, resize and mounts fail with "no QEMU yet; pvm needs one to run VMs. Choose one, once: pvm qemu install (a QEMU built by the pvm-qemu project) or pvm qemu use official (...)". Clusters that cannot recover for want of QEMU are reported as blocked and stay cut off. The daemon picks up `pvm qemu install` or `use` within a few seconds, without a restart; running VMs keep the build they started with until they restart.
+- `pvm daemon status` shows a `qemu:` line with the build and its path, or `none usable: <reason>`, with notes for VMs still running on another build and for blocked clusters. `pvm doctor` has read-only `qemu`, `qemu_builds`, `qemu_update`, `qemu_leftovers` and, on Windows, `qemu_desktop` checks.
+- RAM snapshots bind to the build and CPU arguments that wrote them; a restore under another build is refused, with `pvm qemu use <tag>` or `pvm snapshot rm dev1` as the ways out. After a package manager upgrades an official build, its older snapshots cannot be restored, so snapshot users hold the package (`brew pin qemu`, `sudo apt-mark hold qemu-system-x86 qemu-utils`) or use a project build. Snapshots written before pvm v1.4.0 are refused; restore them under the old version (`pvm upgrade --rollback -y`, `pvm start dev1`, then `pvm upgrade`) or drop them with `pvm snapshot rm dev1`.
+- The QEMU folder that pvm v1.3.x or the v1.4.0 Windows installer placed is taken over as a project build at the daemon's next start when it matches a pinned build file by file. Any other old folder is left alone and listed by `pvm qemu ls` and `pvm qemu gc`.
 
 ## Adding an exit (only when the user explicitly asks)
 

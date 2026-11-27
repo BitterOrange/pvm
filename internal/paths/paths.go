@@ -72,6 +72,9 @@ func (p *Paths) DaemonLock() string       { return filepath.Join(p.Run, "daemon.
 func (p *Paths) DaemonRunLock() string    { return filepath.Join(p.Run, "daemon.run.lock") }
 func (p *Paths) DaemonStopMark() string   { return filepath.Join(p.Run, "daemon.stopped") }
 func (p *Paths) DaemonLog() string        { return filepath.Join(p.Run, "daemon.log") }
+func (p *Paths) QEMUState() string        { return filepath.Join(p.Home, "qemu.json") }
+func (p *Paths) QEMULock() string         { return filepath.Join(p.Run, "qemu.lock") }
+func (p *Paths) QEMUBuilds() string       { return filepath.Join(p.Runtime, "qemu", "builds") }
 func (p *Paths) SSHKey() string           { return filepath.Join(p.Keys, "id_ed25519") }
 func (p *Paths) SSHPubKey() string        { return p.SSHKey() + ".pub" }
 func (p *Paths) KnownHosts() string       { return filepath.Join(p.Keys, "known_hosts") }

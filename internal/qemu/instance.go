@@ -20,6 +20,9 @@ type Instance struct {
 	Cfg       VMConfig
 	StatePath string
 	Toolchain *Toolchain
+	// ToolchainErr is why there is no Toolchain: no usable QEMU build is
+	// selected. Inspecting and stopping need none; starting returns it.
+	ToolchainErr error
 
 	// mu serializes operations within this Instance value only. The daemon
 	// creates a fresh Instance per call, so cross-call lifecycle exclusion
@@ -35,6 +38,9 @@ type RunState struct {
 	Args    []string      `json:"args"`
 	Accel   Accel         `json:"accel"`
 	Started time.Time     `json:"started"`
+	// QEMUBuild is the build this process runs, so snapshots and status
+	// know which binary a running VM uses after the default changes.
+	QEMUBuild *BuildIdentity `json:"qemu_build,omitempty"`
 }
 
 var keyedLocks sync.Map
@@ -103,7 +109,21 @@ func (in *Instance) Start() error {
 	}
 }
 
+// needToolchain is the error for an operation that runs QEMU.
+func (in *Instance) needToolchain() error {
+	if in.Toolchain != nil {
+		return nil
+	}
+	if in.ToolchainErr != nil {
+		return in.ToolchainErr
+	}
+	return ErrNotSetUp
+}
+
 func (in *Instance) startWithAccel(accel Accel) error {
+	if err := in.needToolchain(); err != nil {
+		return err
+	}
 	cfg := in.Cfg
 	cfg.Accel = accel
 	args, err := BuildArgs(in.Toolchain, &cfg)
@@ -143,7 +163,7 @@ func (in *Instance) startWithAccel(accel Accel) error {
 		console, _ := os.ReadFile(cfg.ConsoleLog)
 		return errEarlyExit{fmt.Errorf("qemu died after launch: %v\nqemu log:\n%s\nconsole:\n%s", err, lastLines(tail, 15), lastLines(console, 15))}
 	}
-	st := RunState{PID: cmd.Process.Pid, Ident: ident, Args: append([]string{in.Toolchain.System}, args...), Accel: accel, Started: time.Now()}
+	st := RunState{PID: cmd.Process.Pid, Ident: ident, Args: append([]string{in.Toolchain.System}, args...), Accel: accel, Started: time.Now(), QEMUBuild: in.Toolchain.Build}
 	data, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		cmd.Process.Kill()

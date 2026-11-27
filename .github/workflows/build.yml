@@ -96,7 +96,7 @@ jobs:
           GOOS=windows GOARCH=amd64 go vet ./...
           GOOS=windows GOARCH=amd64 go build ./...
           sh -n scripts/install.sh
-          bash -n script/build.sh script/build-desktop.sh script/pack_assets.sh script/qemu/*.sh script/windows/*.sh
+          bash -n script/build.sh script/build-desktop.sh script/pack_assets.sh script/ci/*.sh script/windows/*.sh
           python3 -B -m unittest discover -s script/ci -p 'test_*.py'
       - name: Test and vet native VPS agent
         if: ${{ !matrix.host }}
@@ -119,8 +119,6 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
       - name: Build once and check embedded documentation
-        env:
-          PVM_PACK_QEMU: '0'
         run: |
           export PVM_VERSION="$(cat VERSION)"
           if [ '${{ matrix.host }}' = 'true' ]; then
@@ -161,6 +159,22 @@ jobs:
           path: pvm-desktop.exe
           retention-days: 14
           if-no-files-found: error
+
+  # Every pvm-qemu pin must match its release and pass its attestation.
+  pins:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Check the pinned pvm-qemu builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./script/ci/fetch-qemu-builds.sh
 
   windows:
     needs: prepare
@@ -338,24 +352,6 @@ jobs:
             grep -F 'github.com/huangzheng2016/pvm/cmd/pvm-desktop' "$RUNNER_TEMP/build-info-desktop.txt"
             grep -F -e '-tags=desktop,production,wv2runtime.browser' "$RUNNER_TEMP/build-info-desktop.txt"
           fi
-      - name: Record QEMU package inputs
-        if: runner.os == 'macOS' && startsWith(github.ref, 'refs/tags/')
-        run: |
-          brew info --json=v2 qemu > qemu-formula.json
-          echo "QEMU_INPUT_HASH=$(shasum -a 256 qemu-formula.json | cut -d' ' -f1)" >> "$GITHUB_ENV"
-      - name: Cache QEMU downloads
-        if: runner.os == 'macOS' && startsWith(github.ref, 'refs/tags/')
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/Library/Caches/Homebrew/downloads
-          key: qemu-${{ runner.os }}-${{ runner.arch }}-${{ env.QEMU_INPUT_HASH }}
-      - name: Install release QEMU
-        if: runner.os == 'macOS' && startsWith(github.ref, 'refs/tags/')
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: '1'
-        run: |
-          brew install qemu
-          brew info --json=v2 --installed > qemu-installed.json
       - name: Import signing certificate
         if: runner.os == 'macOS' && startsWith(github.ref, 'refs/tags/')
         env:
@@ -364,7 +360,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${MACOS_CERTIFICATE_P12_BASE64:-}" ]; then
-            echo 'No distribution certificate configured; runtime uses ad-hoc signing.'
+            echo 'No distribution certificate configured; pvm uses ad-hoc signing.'
             exit 0
           fi
           CERT_PATH="$RUNNER_TEMP/pvm-codesign.p12"
@@ -383,22 +379,22 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         env:
           PVM_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ '${{ runner.os }}' = 'macOS' ]; then
-            ./script/qemu/pack-runtime.sh
             codesign -s "${PVM_CODESIGN_IDENTITY:--}" --force pvm >/dev/null 2>&1
-            tar -czf pvm-qemu-runtime-aarch64.tar.gz -C "$HOME/.pvm/runtime/qemu" aarch64
           fi
           if [ '${{ matrix.out }}' = 'pvm_linux_amd64' ]; then
             printf '%s\n' "$UBUNTU_MIRROR" | sudo tee /etc/apt/apt-mirrors.txt
             sudo apt-get update
-            sudo apt-get install -y --no-install-recommends p7zip-full unzip qemu-system-x86 qemu-system-common qemu-system-data seabios ipxe-qemu qemu-utils patchelf nsis wixl
-            QEMU_METADATA_JSON=qemu-windows.json ./script/qemu/pack-windows-runtime.sh "$RUNNER_TEMP/win-qemu/x86_64"
-            tar -czf pvm-qemu-runtime-windows-x86_64.tar.gz -C "$RUNNER_TEMP/win-qemu" x86_64
+            sudo apt-get install -y --no-install-recommends p7zip-full unzip nsis wixl
+            # v1.4.x only: the pinned pvm-qemu archives under the names pvm
+            # v1.3.x upgrades from, their source, and the Windows tree that
+            # the installers still carry.
+            ./script/ci/fetch-qemu-builds.sh --bridge "$RUNNER_TEMP/bridge"
+            mv "$RUNNER_TEMP"/bridge/pvm-qemu-* .
             ./script/windows/fetch-xpra-client.sh "$RUNNER_TEMP/win-xpra"
-            ./script/windows/pack-setup.sh pvm.exe pvm-desktop.exe "$RUNNER_TEMP/win-qemu/x86_64" "$RUNNER_TEMP/win-xpra" pvm_windows_amd64_setup
-            QEMU_METADATA_JSON=qemu-linux.json ./script/qemu/pack-linux-runtime.sh "$RUNNER_TEMP/linux-qemu/x86_64"
-            tar -czf pvm-qemu-runtime-linux-x86_64.tar.gz -C "$RUNNER_TEMP/linux-qemu" x86_64
+            ./script/windows/pack-setup.sh pvm.exe pvm-desktop.exe "$RUNNER_TEMP/bridge/windows-tree" "$RUNNER_TEMP/win-xpra" pvm_windows_amd64_setup
             tar -czf pvm_windows_amd64.tar.gz pvm.exe
             go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@"$CYCLONEDX_VERSION" bin -json -std -version "$(cat VERSION)" -output pvm_windows_amd64.cdx.json pvm.exe
             go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@"$CYCLONEDX_VERSION" bin -json -std -version "$(cat VERSION)" -output pvm-desktop_windows_amd64.cdx.json pvm-desktop.exe
@@ -412,8 +408,8 @@ jobs:
           if-no-files-found: error
           path: |
             *.tar.gz
+            *.tar
             *.cdx.json
-            qemu-*.json
             *_setup.exe
             *_setup.msi
       - name: Remove temporary signing credentials
@@ -439,12 +435,14 @@ jobs:
           merge-multiple: true
       - name: Hash release artifacts
         working-directory: release
-        run: sha256sum *.tar.gz *.json *_setup.exe *_setup.msi > SHA256SUMS
+        run: sha256sum *.tar.gz *.tar *.json *_setup.exe *_setup.msi > SHA256SUMS
       - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
           subject-path: release/*
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           tag_name: ${{ github.ref_name }}
+          # an rc tag must not become Latest, which install.sh and pvm upgrade use
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: release/*
           fail_on_unmatched_files: true

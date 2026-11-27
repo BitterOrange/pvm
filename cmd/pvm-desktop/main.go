@@ -72,6 +72,13 @@ func run() error {
 			}
 			return runtime.OpenDirectoryDialog(*ctx, runtime.OpenDialogOptions{Title: "Choose a folder"})
 		},
+		PickFile: func(title, pattern string) (string, error) {
+			ctx := window.Load()
+			if ctx == nil {
+				return "", nil
+			}
+			return runtime.OpenFileDialog(*ctx, runtime.OpenDialogOptions{Title: title, Filters: []runtime.FileFilter{{DisplayName: pattern, Pattern: pattern}}})
+		},
 	})
 
 	messages := windows.DefaultMessages()

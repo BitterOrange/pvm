@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/huangzheng2016/pvm/internal/qemu"
 	"github.com/huangzheng2016/pvm/internal/vm"
 )
 
@@ -104,6 +105,7 @@ func TestAgentDialGateHonorsCancellation(t *testing.T) {
 
 func TestReadOnlyMountStoppedLifecycle(t *testing.T) {
 	s, spec, host := newMountTestServer(t)
+	s.TC = &qemu.Toolchain{System: "qemu-system", Build: &qemu.BuildIdentity{ID: "11.1.3-pvm1"}, Caps: qemu.Caps{Virtio9p: true}}
 	body, _ := json.Marshal(map[string]any{"host": host, "guest": "/mnt/data", "read_only": true})
 	rr := httptest.NewRecorder()
 	s.handler().ServeHTTP(rr, httptest.NewRequest("POST", "/v1/vms/dev1/mounts", bytes.NewReader(body)))

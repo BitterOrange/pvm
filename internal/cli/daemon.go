@@ -122,8 +122,10 @@ func CmdDaemon(args []string) int {
 		if err := c.Get("/v1/status", &st); err != nil {
 			return fatalf("%v", err)
 		}
-		fmt.Printf("daemon: running\n  pid:     %v\n  version: %v\n  ready:   %v\n  uptime:  %v\n  accel:   %v\n  qemu:    %v (bundled=%v)\n  vms:     %v (%v running)\n",
-			st["pid"], st["version"], st["ready"], st["uptime"], st["accel"], st["qemu"], st["bundled"], st["vms"], st["running"])
+		fmt.Printf("daemon: running\n  pid:     %v\n  version: %v\n  ready:   %v\n  uptime:  %v\n",
+			st["pid"], st["version"], st["ready"], st["uptime"])
+		printDaemonQEMU(st)
+		fmt.Printf("  vms:     %v (%v running)\n", st["vms"], st["running"])
 		if n, _ := st["tcg_fallback"].(float64); n > 0 {
 			hint := "on macOS a reboot usually restores it"
 			if runtime.GOOS == "windows" {
@@ -162,19 +164,48 @@ func daemonRun(p *paths.Paths) int {
 		return fatalf("assets: %v", err)
 	}
 
-	tc, err := qemu.Find(p.Runtime)
-	if err != nil {
-		return fatalf("%v", err)
-	}
-	accel := qemu.Detect(tc, runtime.GOOS)
 	clusters, err := cluster.LoadStore(p.Clusters)
 	if err != nil {
 		return fatalf("clusters: %v", err)
 	}
-	srv := daemon.NewServer(p, cfg, tc, accel, clusters)
-	fmt.Fprintf(os.Stderr, "pvm daemon: qemu=%s accel=%s sock=%s\n", tc.System, accel, p.DaemonSock())
+	// The daemon runs without a usable QEMU: it resolves the selected
+	// build at each VM start and reports what blocks it.
+	srv := daemon.NewServer(p, cfg, nil, "", clusters)
+	fmt.Fprintf(os.Stderr, "pvm daemon: sock=%s\n", p.DaemonSock())
 	if err := daemon.Run(p, srv); err != nil {
 		return fatalf("daemon: %v", err)
 	}
 	return 0
+}
+
+// printDaemonQEMU prints the daemon's QEMU build, or what blocks VMs.
+func printDaemonQEMU(st map[string]any) {
+	b, hasBuild := st["qemu_build"].(map[string]any)
+	problems, _ := st["qemu_problems"].([]any)
+	switch {
+	case hasBuild:
+		fmt.Printf("  accel:   %v", st["accel"])
+		if forced, _ := st["accel_forced"].(bool); forced {
+			fmt.Print(" (forced by PVM_QEMU_ACCEL)")
+		}
+		fmt.Printf("\n  qemu:    %v %v\n", b["label"], b["path"])
+	case len(problems) > 0:
+		fmt.Printf("  qemu:    none usable: %v\n", problems[0])
+	default:
+		fmt.Printf("  qemu:    %v\n  note:    the running daemon is pvm %v, older than this pvm; restart it: pvm daemon restart\n", st["qemu"], st["version"])
+	}
+	if changed, ok := st["qemu_changed"].([]any); ok {
+		for _, c := range changed {
+			if m, ok := c.(map[string]any); ok {
+				fmt.Printf("  note:    %v still runs on %v until it restarts\n", m["vm"], m["build"])
+			}
+		}
+	}
+	if blocked, ok := st["blocked_clusters"].([]any); ok {
+		for _, b := range blocked {
+			if m, ok := b.(map[string]any); ok {
+				fmt.Printf("  note:    cluster %v is blocked: %v\n", m["cluster"], m["reason"])
+			}
+		}
+	}
 }

@@ -35,7 +35,12 @@ func (s *Server) handleCompact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	disk := qemu.ActiveDisk(vmDir, spec.Disk(s.P))
-	result, err := qemu.CompactDisk(s.TC, disk)
+	tc, _, err := s.qemu()
+	if err != nil {
+		writeErr(w, 409, err)
+		return
+	}
+	result, err := qemu.CompactDisk(tc, disk)
 	if err != nil {
 		writeErr(w, 500, err)
 		return

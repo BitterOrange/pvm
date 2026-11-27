@@ -162,8 +162,12 @@ func newGuestMount(spec *vm.Spec, host, guest, profile string) (vm.GuestMount, e
 }
 
 func (s *Server) addMount(spec *vm.Spec, m vm.GuestMount) error {
-	if !s.TC.SupportsVirtio9p() {
-		return fmt.Errorf("current QEMU build does not support virtio-9p; use WSL2 mode or a QEMU build with VirtFS enabled")
+	tc, _, err := s.qemu()
+	if err != nil {
+		return err
+	}
+	if !tc.SupportsVirtio9p() {
+		return fmt.Errorf("this QEMU build has no virtio-9p (no QEMU for Windows has it); use WSL2 mode for host mounts")
 	}
 	mounts := append(append([]vm.GuestMount(nil), spec.Mounts...), m)
 	next := *spec

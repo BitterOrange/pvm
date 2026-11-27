@@ -175,10 +175,33 @@ func Ensure(p *paths.Paths) (*Client, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("spawn daemon: %w", err)
 	}
-	if !waitHealthy(c, ensureHealthyTimeout) {
-		return nil, fmt.Errorf("daemon spawned (pid %d) but did not become healthy; see %s", cmd.Process.Pid, p.DaemonLog())
+	exited := make(chan struct{})
+	go func() { cmd.Wait(); close(exited) }()
+	deadline := time.Now().Add(ensureHealthyTimeout)
+	for !c.Healthy() {
+		select {
+		case <-exited:
+			return nil, fmt.Errorf("the daemon exited while starting: %s; full log: %s", lastLogLine(p.DaemonLog()), p.DaemonLog())
+		case <-time.After(200 * time.Millisecond):
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("daemon spawned (pid %d) but did not become healthy; see %s", cmd.Process.Pid, p.DaemonLog())
+		}
 	}
 	return c, ensureReady(c)
+}
+
+// lastLogLine is the last non-empty line of the daemon log.
+func lastLogLine(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "(no log)"
+	}
+	if len(data) > 64<<10 {
+		data = data[len(data)-64<<10:]
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\r\n"), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
 }
 
 func waitReady(c *Client, d time.Duration) bool {

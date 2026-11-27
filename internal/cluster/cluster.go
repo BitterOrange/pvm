@@ -11,8 +11,12 @@ import (
 
 	"github.com/huangzheng2016/pvm/internal/fsutil"
 	"github.com/huangzheng2016/pvm/internal/gw/rules"
+	"github.com/huangzheng2016/pvm/internal/native"
 	"github.com/huangzheng2016/pvm/internal/paths"
 )
+
+// rootPorts is a variable for tests.
+var rootPorts = native.PCIRootPorts
 
 const (
 	GatewayVMNamePrefix = "pvm-gw"
@@ -21,7 +25,6 @@ const (
 	poolStride          = 1000
 	PoolSize            = 100
 	vmIPBase            = 10 // first VM is .10
-	vmIPMax             = 73 // 64 slots, matching gateway hotplug root ports
 )
 
 type VMNet struct {
@@ -235,12 +238,18 @@ func (s *Store) AddVM(id int, name string) (*VMNet, error) {
 		}
 	}
 	var last int
-	for last = vmIPBase; last <= vmIPMax; last++ {
+	// one slot per gateway hotplug root port
+	slots := rootPorts()
+	ipMax := vmIPBase + slots - 1
+	for last = vmIPBase; last <= ipMax; last++ {
 		if !used[last] {
 			break
 		}
 	}
-	if last > vmIPMax {
+	if last > ipMax {
+		if slots < 64 {
+			return nil, fmt.Errorf("cluster %d is full: its gateway has %d root ports, as many as this host's hypervisor allows a VM", id, slots)
+		}
 		return nil, fmt.Errorf("cluster %d out of IPs", id)
 	}
 	vn := &VMNet{

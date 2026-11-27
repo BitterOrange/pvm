@@ -196,7 +196,7 @@ func (s *Spec) QEMUConfig(p *paths.Paths, accel qemu.Accel, linkSock string) qem
 	switch {
 	case s.Role == "gateway":
 		net = qemu.Network{Mode: qemu.NetSlirp, SSHHostPort: s.SSHPort}
-		hotplug = 64 // rp10..rp73, one per cluster VM slot
+		hotplug = native.PCIRootPorts() // rp10.., one per cluster VM slot
 	case linkSock != "":
 		net = qemu.Network{Mode: qemu.NetCluster, LinkSock: linkSock, MAC: s.MAC}
 	default:

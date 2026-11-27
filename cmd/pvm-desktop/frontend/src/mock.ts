@@ -6,7 +6,9 @@
 //
 // ?mock=<scene> in the address opens another state: loading, error, wsl,
 // stopped, down (the daemon is started once by itself), empty, orphan
-// (the default exit was removed).
+// (the default exit was removed), noqemu (no QEMU set up yet), installing
+// (as noqemu, with a slow download), pending (an older pvm's QEMU waits to
+// be taken over) and blocked (the default build failed its check).
 
 import {
   connect,
@@ -16,6 +18,7 @@ import {
   type CreateRequest,
   type Exit,
   type Image,
+  type QEMUBuild,
   type Resources,
   type Settings,
   type State,
@@ -87,6 +90,25 @@ let workspaces: Workspace[] = empty
 
 const settings: Settings = { default_vm: empty ? "" : "dev1", daemon_at_login: true, app_at_login: false };
 
+const noQEMU = scene === "noqemu" || scene === "installing";
+const tag = "11.1.3-pvm1";
+
+const projectBuild = (): QEMUBuild => ({
+  id: tag,
+  label: tag + " (project build, QEMU 11.1.3)",
+  source: "project",
+  version: "11.1.3",
+  path: "C:\\Users\\me\\.pvm\\runtime\\qemu\\builds\\" + tag + "\\x86_64\\bin\\qemu-system-x86_64.exe",
+  default: true,
+  virtio_9p: false,
+  withdrawn: "",
+});
+
+let qemuBuilds: QEMUBuild[] = noQEMU || scene === "pending" ? [] : [projectBuild()];
+
+const checkFailed = tag + " failed its check: bin/qemu-system-x86_64.exe differs from SHA256SUMS; reinstall: pvm qemu rm " + tag + " -y && pvm qemu install " + tag + " --use";
+const pending = "C:\\Users\\me\\.pvm\\runtime\\qemu\\x86_64 holds a QEMU from an older pvm that has not been taken over yet; restart the daemon (pvm daemon restart) or run pvm qemu ls";
+
 const state: State = {
   backend: scene === "wsl" ? "wsl" : "native",
   daemon_healthy: scene !== "stopped" && scene !== "down",
@@ -97,7 +119,38 @@ const state: State = {
   tcg_fallback: 1,
   data_dir: "C:\\Users\\me\\.pvm",
   host_cpus: 8,
+  qemu: {
+    ready: !noQEMU,
+    pending_adoption: scene === "pending",
+    default: qemuBuilds.length > 0 ? tag : "",
+    default_label: qemuBuilds.length > 0 ? qemuBuilds[0].label : "",
+    problem: scene === "blocked" ? checkFailed : scene === "pending" ? pending : "",
+    blocked: scene === "blocked" ? ["cluster 1: " + checkFailed] : [],
+    recommended: { id: tag, size_mb: 72, installed: qemuBuilds.length > 0 },
+    official: noQEMU
+      ? { found: false, label: "", version: "", path: "", problem: "QEMU from MSYS2 UCRT64 is not installed in C:\\msys64", registered: false }
+      : { found: true, label: "QEMU from MSYS2 UCRT64", version: "11.1.0-1", path: "C:\\msys64\\ucrt64\\bin\\qemu-system-x86_64.exe", problem: "", registered: false },
+  },
+  marker: "pvm-desktop:qemu-builds/1",
 };
+
+// setDefault makes a build the default, as pvm qemu use does.
+function setDefault(b: QEMUBuild): void {
+  qemuBuilds = [...qemuBuilds.filter((x) => x.id !== b.id).map((x) => ({ ...x, default: false })), { ...b, default: true }];
+  state.qemu = { ...state.qemu, ready: true, pending_adoption: false, default: b.id, default_label: b.label, problem: "", blocked: [] };
+  state.qemu.recommended.installed = qemuBuilds.some((x) => x.id === tag);
+  state.qemu.official.registered = qemuBuilds.some((x) => x.id === "official");
+}
+
+function installQEMU(command: string, download: boolean): Promise<Task> {
+  const lines = [
+    ...(download ? ["downloading pvm-qemu-" + tag + "-windows-amd64.tar.gz", ...[10, 30, 50, 70, 90, 100].map((p) => "  " + p + "%")] : []),
+    "verifying pvm-qemu-" + tag + "-windows-amd64.tar.gz",
+    "checking " + tag,
+    "installed " + tag + " (QEMU 11.1.3) and made it the default",
+  ];
+  return runTask("Install QEMU", [said("PVM_BACKEND=native " + command, lines, () => setDefault(projectBuild()), scene === "installing" ? 2500 : 400)]);
+}
 
 const images: Image[] = [
   { spec: "ubuntu:26.04", golden: true },
@@ -362,6 +415,38 @@ const backend: Backend = {
   Images: async () => images,
   CreateDefaults: async () => ({ user: "pvm", cpus: 4, mem_mb: 4096, disk_gb: 20, exit: defaultExit }),
   PickFolder: async () => "C:\\Users\\me\\projects\\my-project",
+  QEMUBuilds: async () => structuredClone(qemuBuilds),
+  PickQEMUArchive: async () => "C:\\Users\\me\\Downloads\\pvm-qemu-" + tag + "-windows-amd64.tar.gz",
+  CheckQEMUAgain: async () => {
+    await sleep(300);
+  },
+  InstallQEMU: () => installQEMU("pvm qemu install --use -y", true),
+  InstallQEMUFromFile: (path) => installQEMU("pvm qemu install --file " + path + " --use -y", false),
+  UseOfficialQEMU: () => {
+    const o = state.qemu.official;
+    if (!o.found) {
+      return refuse(o.problem);
+    }
+    const b: QEMUBuild = { id: "official", label: "QEMU from MSYS2 UCRT64, QEMU 11.1.0", source: "official", version: "11.1.0", path: o.path, default: true, virtio_9p: false, withdrawn: "" };
+    return one("Use the official QEMU", "PVM_BACKEND=native pvm qemu use official", ["using " + b.label + " (" + o.path + ")"], () => setDefault(b));
+  },
+  UseQEMU: (id) => {
+    const b = qemuBuilds.find((x) => x.id === id);
+    return b ? one("Use QEMU " + id, "PVM_BACKEND=native pvm qemu use " + id, ["using " + id], () => setDefault(b)) : refuse("QEMU build " + id + " is not installed");
+  },
+  RemoveQEMU: (id, confirmed) => {
+    if (!confirmed) {
+      return refuse("removing QEMU build " + id + " was not confirmed");
+    }
+    if (state.qemu.default === id) {
+      return refuse(id + " is the default; pick another first: pvm qemu use <build>|official");
+    }
+    return one("Remove QEMU " + id, "PVM_BACKEND=native pvm qemu rm " + id + " -y", ["removed " + id], () => {
+      qemuBuilds = qemuBuilds.filter((x) => x.id !== id);
+      state.qemu.recommended.installed = qemuBuilds.some((x) => x.id === tag);
+      state.qemu.official.registered = qemuBuilds.some((x) => x.id === "official");
+    });
+  },
 
   StartDaemon: () =>
     one("Start the daemon", "pvm daemon start", ["daemon started"], () => {
@@ -549,5 +634,6 @@ export function install(): void {
     onTaskOutput: (callback) => void outputListeners.push(callback),
     windowIsMinimised: async () => document.hidden,
     copyText: (text) => navigator.clipboard.writeText(text).then(() => true),
+    openURL: (url) => void window.open(url, "_blank", "noopener"),
   });
 }

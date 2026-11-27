@@ -16,6 +16,7 @@ The app is another client of the same daemon and the same CLI. It adds no behavi
 - **App install scripts are built into pvm**, one folder per app, and usable from the CLI too (`pvm app install`).
 - **One default exit**, the existing cluster default (`pvm route default --via`). An ordered list with failover is a separate roadmap item, since failing over must keep the kill-switch fail-closed.
 - **A stored default VM** in `config.yaml`, used by the CLI and the app alike.
+- **First run: the QEMU page.** From v1.4.0 the daemon runs without QEMU, so the app no longer treats a missing QEMU as a broken install. While no QEMU build is the default, it shows a QEMU page in place of the screens, even with a healthy daemon: "QEMU built by pvm (recommended)", with Install and Install from file, and "QEMU from MSYS2 UCRT64", with the detection result, the pacman command, a link to the qemu.org downloads and Check again. Each runs `pvm qemu` as a task with `PVM_BACKEND=native`, and the daemon picks the result up without a restart. The WSL2 page offers the same page as "Set up QEMU for Windows", which moves the app to the native backend; Settings has a QEMU panel and About shows the build and the pvm-qemu notice. `pvm-desktop.exe` carries the marker string `pvm-desktop:qemu-builds/1`, by which `pvm.exe` recognises a PVM Desktop from before v1.4.0 and asks once to rerun the installer, since the release build of the app carries no readable version.
 
 ## Scope
 

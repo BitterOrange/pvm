@@ -75,6 +75,13 @@ image:
                 flags: --keep-vm --cpus N --mem MB --disk GB
   image list    list base and golden images
 
+qemu:
+  qemu ls       the QEMU builds pvm can run, the default, and leftovers: pvm qemu [ls] [--json]
+  qemu install  install a pvm-qemu project build: pvm qemu install [<tag>] [--file <archive>] [--use] [--unpinned] [-y]
+  qemu use      pick the default: pvm qemu use <tag>|official (official: Homebrew, your distribution, or MSYS2 UCRT64)
+  qemu check    check a build: pvm qemu check [<tag>|official|--default] [--read-only] (exit 0 ok, 3 not set up, 1 failing)
+  qemu rm|gc    remove a build or leftover folders: pvm qemu rm <tag>|official [-y] | pvm qemu gc [-y]
+
 daemon:
   daemon start|stop|status|restart
   daemon run                foreground (used by launchd/systemd)
@@ -149,8 +156,10 @@ func main() {
 		os.Exit(cli.DelegateToWSL(os.Args[1:]))
 	}
 	switch os.Args[1] {
-	case "audit", "doctor", "route", "upgrade", "version", "--version", "-v", "skill", "security", "exit-agent", "agent", "gateway", "__snapshot-pipe-out", "__snapshot-pipe-in", "__probe-rtt":
+	case "audit", "doctor", "route", "upgrade", "version", "--version", "-v", "skill", "security", "exit-agent", "agent", "gateway", "qemu", "__snapshot-pipe-out", "__snapshot-pipe-in", "__probe-rtt":
 	default:
+		cli.MaybeNotifyOldDesktop()
+		cli.MaybeNotifyOldSnapshots()
 		cli.MaybeNotifyUpgrade()
 	}
 	var code int
@@ -195,6 +204,8 @@ func main() {
 		code = cli.CmdExitAgent(args)
 	case "snapshot":
 		code = cli.CmdSnapshot(args)
+	case "qemu":
+		code = cli.CmdQEMU(args)
 	case "__snapshot-pipe-out":
 		code = cli.CmdSnapshotPipeOut(args)
 	case "__snapshot-pipe-in":

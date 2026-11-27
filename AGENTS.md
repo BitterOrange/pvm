@@ -6,12 +6,12 @@
 
 - 先明确可验证结果，再做最小实现。明显的问题直接修复，不反复询问；涉及删除用户数据、生产服务或远程操作时，先确认影响范围并保留回滚路径。
 - 遵循现有模块边界和本地惯用写法，不夹带无关重构，不做推测性功能，不为不会发生的场景增加错误处理。
-- 本项目只维护当前行为，不重新加入跨架构兼容、旧格式兼容或无用的回退路径。
+- 本项目只维护当前行为，不重新加入跨架构兼容、旧格式兼容或无用的回退路径。例外：QEMU 过渡代码（旧位置与 `msi-payload` 的收编迁移、仅 v1.4.x 发布附带的 `pvm-qemu-runtime-*` 桥接资产及其源码副本、回滚到 v1.3.x 所需的 QEMU 恢复字段）按 Hard Constraint 5 的过渡例外保留，到 v1.5.0 统一删除；期间不得扩展，也不得提前删除。
 - 注释只解释非显而易见的原因，不写样板、变更史、个人经历或代码已经表达的内容。Review 说清 bug 和修复即可；原因未确认就明确说未确认，不猜。
 - 纯文本使用普通连字符和直引号，命令和代码输出必须可直接复制粘贴。
 - 并行工作只处理互不依赖的文件或验证任务；同一文件、共享状态和最终合并由一个人负责，避免并发覆盖。
 - 不为某个目录增加 Git 特殊规则或反向排除。`.gitignore` 只描述通用构建产物和临时文件；测试源码是正常源码，不得通过忽略规则隐藏。
-- 不提交二进制、QEMU runtime、压缩 guest、临时脚本、工作笔记或测试残留。测试结束后删除生成的二进制和临时产物，并确认 `git status` 干净地只包含预期源码和测试变化。
+- 不提交二进制、QEMU 构建及其归档、压缩 guest、临时脚本、工作笔记或测试残留。测试结束后删除生成的二进制和临时产物，并确认 `git status` 干净地只包含预期源码和测试变化。
 - 提交、推送、打 tag、发版和 force-push 都要用户明确要求；`master` 是主分支。提交信息、PR 和说明中不加入 agent 身份或 co-author 信息。
 
 ## Project Map
@@ -25,7 +25,7 @@
 - `cmd/pvm-desktop`: Windows 图形应用 PVM Desktop 的入口（Wails 窗口）和 `frontend/` 前端（TypeScript + Vite）；前端构建产物只在 `production` tag 下 embed，不入库。
 - `internal/cli`: CLI 参数解析和 daemon 瘦客户端；所有用户可见行为都要在这里一致处理。
 - `internal/daemon`: 常驻控制面，unix socket 上的 HTTP/JSON，负责 VM/cluster 生命周期和 readiness；daemon 单实例 flock。
-- `internal/qemu`: QEMU 工具链、进程/QMP、快照和运行状态。
+- `internal/qemu`: QEMU 构建登记（`~/.pvm/qemu.json`）、构建身份、门槛、能力探测与冒烟启动、项目构建安装和官方渠道检测，以及进程/QMP、快照和运行状态；`pvmqemu.json` 固定 pvm-qemu 构建。
 - `internal/vm`: VM 规格、overlay 盘、cloud-init seed、端口和磁盘元数据。
 - `internal/image`: 基础镜像下载、缓存和 golden 镜像烘焙；golden 是不可变、按版本保留的资产。
 - `internal/cluster`: 集群状态、子网/IP/MAC、端口池和路由状态，持久化必须原子写。
@@ -46,28 +46,39 @@
 - `internal/keys`: pvm 专用 SSH keypair，绝不触碰 `~/.ssh` 或 macOS 钥匙串。
 - `internal/fsutil`: 原子写和文件锁。
 - `internal/buildinfo`: 构建期版本号。
-- `script/build.sh`: 原生构建入口；`script/qemu/`: bundled QEMU 组装与签名，包含 macOS `pack-runtime.sh`、Linux `pack-linux-runtime.sh` 和 Windows `pack-windows-runtime.sh`。Windows 固件放在 `bin/share`，Linux 合并发行版 BIOS 与 iPXE ROM 到 `share/qemu`，携带 ELF loader、QEMU 模块和动态库闭包，并通过 `QEMU_MODULE_DIR` 与隔离启动探测验证可迁移性。
+- `script/build.sh`: 原生构建入口。本仓库不构建、不打包 QEMU：QEMU 构建由独立仓库 pvm-qemu 发布，本仓库在 `internal/qemu/pvmqemu.json` 中固定其构建，并由 `script/ci/fetch-qemu-builds.sh` 核对这些固定值。
 - `SKILL.md`/`SECURITY.md`: 面向 agent 的使用和安全指南，构建期 embed 到二进制中。
 
 ## Build & Test
 
 - Go 使用 1.27；只构建宿主原生架构（darwin/arm64、linux/amd64、windows/amd64 host，其中 Windows 支持 WSL2 桥接与原生 WHPX/QEMU 双模式）。Linux amd64/arm64 release 二进制用于对应 VPS，不做跨架构 host 模拟。
 - 完整构建使用 Go 1.27.4 和 garble v0.18.0：`go install mvdan.cc/garble@v0.18.0`；CI 固定这两个版本。
-- `./script/build.sh` 从 `./cmd/agent` 构建专用 guest，使用 garble `-tiny`、固定 seed、`-trimpath`、`-buildvcs=false` 和空 build ID，再构建 gateway、assetpack 和带 `embedassets` 的 host 二进制；macOS 默认追加 bundled QEMU，`PVM_PACK_QEMU=0` 可跳过。根目录 `./pvm` 是构建产物，不是源码，验证后必须删除。
+- `./script/build.sh` 从 `./cmd/agent` 构建专用 guest，使用 garble `-tiny`、固定 seed、`-trimpath`、`-buildvcs=false` 和空 build ID，再构建 gateway、assetpack 和带 `embedassets` 的 host 二进制。根目录 `./pvm` 是构建产物，不是源码，验证后必须删除。
 - `./script/build-desktop.sh` 构建 `pvm-desktop.exe`，需要 Node.js 22（npm）：先在 `cmd/pvm-desktop/frontend` 执行 `npm ci && npm run build`，再交叉编译；`go build/vet/test ./...` 不需要先构建前端。根目录 `./pvm-desktop.exe` 同样是构建产物。
 - 常规提交和发布默认通过 `go test ./...`、`go vet ./...`、`sh -n scripts/install.sh` 和必要构建，不把全仓 `go test -race` 作为门槛。
 - 不要在 Windows 宿主上运行全仓 `go test ./...`：测试套件按 Unix 编写（文件权限位、`/tmp` 等路径、symlink、`ip`/`gh`/`bash` 等工具），在 Windows 上大量失败且与改动无关；`internal/cli` 测试还会反复拉起自身进程，留下大量 `cli.test.exe` 拖慢机器。Windows 上只运行与改动相关的定向测试（`go test ./internal/<pkg> -run '<Name>'`），全仓测试以 Linux/macOS（CI 或 WSL2）为准。
 - 修改并发或状态路径时，仍须完成相关包的定向测试和必要行为验证；仅在专项任务或用户明确要求时，对相关包运行 `go test -race`。
 - 功能改动必须验证真实行为：CLI 帮助和参数、伪终端 SSH、create/start/readiness、失败回滚、挂载、端口和出口链路。只做编译或 import 检查不算完成；不能验证的项目要在交付说明中列明。
+- 修改 QEMU 选择、门槛、探测、CPU 参数或快照绑定时，至少用一个项目构建和一个官方构建验证 create、start、readiness、快照创建与恢复，以及隧道断开时 VM 断网。
 - 修改文档示例、CLI 文本或嵌入文档时，同时检查源码、`README.md` 及其中文版 `README.zh-CN.md`（两者内容保持同步）、`SKILL.md`、`SECURITY.md` 和构建后 `pvm skill`/`pvm security` 的输出，避免文档与实现漂移。
 
 ## Hard Constraints
 
-1. 公开仓库和公开输出中禁止真实 IP、域名、VPS 地址、token、私钥、证书指纹、个人路径、真实出口名和真实主机名。示例和测试统一使用 `dev1`、`my-exit`、`vps.example.com`、`example.com`、`YOUR_TOKEN` 或 `203.0.113.0/24` 等 mock 值；提交前搜索 diff 和嵌入输出。
+1. 公开仓库和公开输出中禁止真实 IP、域名、VPS 地址、token、私钥、证书指纹、个人路径、真实出口名和真实主机名。示例和测试统一使用 `dev1`、`my-exit`、`vps.example.com`、`example.com`、`YOUR_TOKEN` 或 `203.0.113.0/24` 等 mock 值；提交前搜索 diff 和嵌入输出。上游项目公开发布的签名公钥指纹，以及公开发布产物的 SHA256（如 `script/windows/fetch-xpra-client.sh` 和 `internal/qemu/pvmqemu.json` 中固定的值、SECURITY.md 中的 QEMU 发布密钥指纹），是公开校验值，不属于上述禁止项；新增或修改时须在评审中逐项核对来源。
 2. 状态文件必须走 `fsutil.AtomicWrite`（tmp+fsync+rename）。daemon 必须单实例 flock；guest 侧规则、路径和命令输入必须白名单校验。
 3. 流量泄漏和身份混同是最高严重度：kill-switch 必须 fail-closed，隧道断开时 VM 断网，绝不能回退宿主直连。不得把宿主 `~/.ssh`、`~/.gitconfig` 或个人文件传入 VM；不得主动删除用户文件。
 4. 密钥和证书必须可恢复且不静默轮换：缺少公钥时从已有私钥派生，私钥/公钥不匹配要报错，不能覆盖有效私钥。
-5. QEMU 只使用 bundled 或系统安装版本，版本门槛和 HVF 签名 entitlement 不得绕过。VPS 的 nft/iptables 规则按实例命名空间精确创建和清理，绝不 flush 全局规则。
+5. QEMU 只有两种来源。
+
+   (a) 项目构建：独立仓库 pvm-qemu 的发布 workflow 从上游发布源码包构建（源码包必须同时通过固定指纹的 GPG 签名校验和固定 SHA256 校验，只叠加该仓库公开的上游补丁），并在同一 release 公开完整对应源码。pvm 只在以下情况把它安装到 `~/.pvm/runtime/qemu/builds/<tag>`：归档 SHA256 与本版本 `internal/qemu/pvmqemu.json` 的固定值一致（本仓库 CI 已用 `gh attestation verify` 对 pvm-qemu 仓库、发布 workflow 和 tag 核对）；或对未固定的 tag 显式使用 `--unpinned` 并通过同样绑定的 `gh attestation verify`。`pvmqemu.json` 撤回的构建不得使用。
+
+   (b) 官方构建：macOS 的 Homebrew、Linux 发行版软件包、Windows 上 qemu.org 链接的 MSYS2 UCRT64，由用户通过该渠道安装。pvm 只在固定位置检测并核对渠道归属、给出安装指引和检查，不下载、不重新打包、不分发。
+
+   pvm 只按 `~/.pvm/qemu.json` 中选定构建的绝对路径运行 QEMU，不在 PATH 或其他位置查找。任何构建在登记前和二进制变化后，都必须通过按宿主的最低版本门槛、加速器与设备能力探测、pvm 参数冒烟启动和固件检查；macOS 上 qemu-system 还必须通过 `codesign --verify --strict` 并带 `com.apple.security.hypervisor` entitlement。这些检查不得绕过，也不得按安装位置豁免。项目构建在安装、迁移、`pvm qemu check` 和 daemon 首次使用时逐文件核对 SHA256SUMS，之后每次启动核对每个文件的大小和修改时间，有变化即重新逐文件核对，不符即拒绝使用。所选构建缺失、被改动、被撤回或不合格时显式报错并给出下一步命令，绝不静默换用其他构建。RAM 快照只恢复到写入它的同一构建（构建 id 加 qemu-system SHA256）和同一 CPU 参数。影响客户机 CPU 行为的能力声明只来自 `pvmqemu.json`。本仓库不构建、不重新打包 QEMU。
+
+   v1.5.0 之前的过渡例外：仅 v1.4.x 发布附带、供旧版 `pvm upgrade` 使用的 `pvm-qemu-runtime-*` 资产，以及 v1.4.0 Windows 安装器中的 QEMU，只能是 `pvmqemu.json` 固定、与 pvm-qemu 发布资产逐字节相同的归档，并在同一 release 附带其完整对应源码；迁移只能把逐文件核对通过的固定构建，从 `runtime/qemu/<arch>` 和 Windows 的 `runtime/qemu/msi-payload` 收编为项目构建，且只能由持有 daemon 运行锁的进程执行。
+
+   VPS 的 nft/iptables 规则按实例命名空间精确创建和清理，绝不 flush 全局规则。
 6. 失败必须显式可见：不得静默忽略参数、状态错误或部分成功。create/clone/map/route 等先落状态再做副作用的操作必须回滚，或返回清楚的可恢复状态和下一步命令。
 7. `running`、guest provision、agent ready 和 cluster ready 必须分开建模。启动、升级和 daemon 恢复不能让 CLI 在资源尚未就绪时假装成功；长操作要有进度和可恢复的错误提示。
 

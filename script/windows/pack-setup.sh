@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # pack-setup.sh: build the per-user Windows installers from a built pvm.exe,
-# pvm-desktop.exe (script/build-desktop.sh), an assembled Windows QEMU runtime
-# (script/qemu/pack-windows-runtime.sh) and the Xpra client for `pvm app`
-# (script/windows/fetch-xpra-client.sh): <out>.exe (NSIS) and <out>.msi (wixl).
+# pvm-desktop.exe (script/build-desktop.sh), the extracted tree of the pinned
+# pvm-qemu Windows build (script/ci/fetch-qemu-builds.sh --bridge) and the
+# Xpra client for `pvm app` (script/windows/fetch-xpra-client.sh): <out>.exe
+# (NSIS) and <out>.msi (wixl). v1.4.1 drops the QEMU tree.
 #
 #   ./script/windows/pack-setup.sh <pvm.exe> <pvm-desktop.exe> <runtime-x86_64-dir> <xpra-dir> [out-basename]
 #
@@ -68,7 +69,9 @@ build_msi() {
   work=$(mktemp -d)
   # shellcheck disable=SC2064
   trap "rm -rf '$work'" RETURN
-  heat "$RUNTIME_DIR" RUNTIMEDIR RuntimeFiles RuntimeDir runtime/x86_64/ > "$work/runtime.wxs"
+  # A prefix of its own gives the payload component GUIDs of its own; see
+  # the RUNTIMEDIR comment in pvm-setup.wxs.
+  heat "$RUNTIME_DIR" RUNTIMEDIR RuntimeFiles RuntimeDir msi-payload/x86_64/ > "$work/runtime.wxs"
   heat "$XPRA_DIR" XPRADIR XpraFiles XpraDir xpra/ > "$work/xpra.wxs"
   local running_b64
   running_b64=$(base64 < "$SCRIPT_DIR/pvm-running.ps1" | tr -d '\r\n')

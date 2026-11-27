@@ -27,11 +27,12 @@
 - [x] Chromium 应用的渲染进程 CPU 上限；输入法文字经 ibus 输入，Windows 上候选框跟随文本光标；声音更省 CPU、静音不发送，麦克风随耳机插拔切换（v1.3.4）
 - [x] 密钥环改为设置项，`off` 或 `host`（加密存放、由宿主机解锁）；按虚拟机设置窗口缩放；应用设置对已打开的窗口立即生效；Electron 应用点击后不再出现焦点框（v1.3.5）
 - [x] PVM Desktop：虚拟机未启动时点终端、应用、文件，会询问是否先启动，就绪后自动打开；应用设置分组显示，不用滚动就能看到全部（v1.3.6）
+- [x] `pvm qemu`：按摘要固定的 pvm-qemu 构建或本平台官方 QEMU，没有 QEMU 也能运行的 daemon，PVM Desktop 的 QEMU 页面；M1 Mac 上网关可以启动（v1.4.0）
 
 计划中：
 
 - [ ] 正式名称：Proxied Virtual Machine (PVM)，待与上游确认
-- [ ] 安装包不再自带 QEMU：用 `pvm qemu` 选择新项目 pvm-qemu 从上游签名源码编译的版本，或本平台的官方版本（[计划](docs/design/qemu.md)）
+- [ ] 安装包不再自带 QEMU 的第二步：安装包去掉 QEMU，`install.sh` 改为运行 `pvm qemu install`（v1.4.1；[计划](docs/design/qemu.md)）
 - [ ] WHPX：虚拟机内可用 AVX，并按虚拟机选择 QEMU（pvm-qemu 构建或本平台的官方版）
 - [ ] `pvm app`：macOS 和 Linux 上宿主机到虚拟机的剪贴板、WSL2，以及不用 ibus 的程序里的输入法输入
 - [ ] `pvm desktop` 像 `pvm app` 一样作为宿主机窗口打开，并在虚拟机文件管理器里打开工作区目录
@@ -64,10 +65,11 @@ pvm 支持 arm64 的 macOS、amd64 的 Linux，以及 amd64 的 Windows。
 2. 运行它，不需要管理员权限。
 3. 打开新的终端让 `PATH` 变更生效，运行 `pvm doctor` 检查加速和后端。也可以从开始菜单打开 **PVM Desktop**，见 [PVM Desktop](#pvm-desktop)。
 
-两种安装包都会把 `pvm.exe` 和 `pvm-desktop.exe` 装到 `%LOCALAPPDATA%\pvm` 并把该目录加入用户 `PATH`，在开始菜单添加"PVM Desktop"快捷方式，把 Xpra 客户端装到 `%LOCALAPPDATA%\pvm\xpra`，把 QEMU 运行时装到 `%USERPROFILE%\.pvm\runtime\qemu\x86_64`（设置了 `PVM_HOME` 时装在它下面）。每台机器只用一种安装包。两种安装的 `pvm.exe` 和 QEMU 运行时都可以用 `pvm upgrade` 更新；它不更新 `pvm-desktop.exe`，要更新图形应用请运行新版安装包。
+两种安装包都会把 `pvm.exe` 和 `pvm-desktop.exe` 装到 `%LOCALAPPDATA%\pvm` 并把该目录加入用户 `PATH`，在开始菜单添加"PVM Desktop"快捷方式，把 Xpra 客户端装到 `%LOCALAPPDATA%\pvm\xpra`，把固定版本的 [pvm-qemu 构建](#qemu)放到 `%USERPROFILE%\.pvm\runtime\qemu` 下（设置了 `PVM_HOME` 时放在它下面），pvm 的 daemon 首次启动时会把它收编到 `runtime\qemu\builds`。每台机器只用一种安装包。`pvm upgrade` 只更新 `pvm.exe`，既不改动 QEMU，也不更新 `pvm-desktop.exe`；要更新图形应用请运行新版安装包。卸载时会保留 `runtime\qemu\builds` 下的 QEMU 构建和你的虚拟机。
 
 - `.exe` 安装包的最后一页提供"Open PVM Desktop"选项，默认不勾选。MSI 没有这一页。
 - 正在运行的 pvm、虚拟机或 PVM Desktop 占用的文件无法替换。交互运行时会提示关闭 PVM Desktop 并停止 daemon（同时停止正在运行的虚拟机）；静默运行（`/S`、`msiexec /qn`）则直接拒绝，请先关闭 PVM Desktop 并执行 `pvm daemon stop`。
+- 请一直使用最初那种安装包：`.exe` 不会覆盖 MSI 安装，MSI 也不会覆盖 `.exe` 安装。要换用另一种，先在"设置 > 应用"中卸载，虚拟机会保留。
 - MSI 静默安装：`msiexec /i pvm_windows_amd64_setup.msi /qn`。传入 `PVMHOME=D:\pvm-home` 可指定数据位置，升级和卸载会沿用它。
 - 从"设置 > 应用"卸载会删除 pvm、PVM Desktop 及其开始菜单快捷方式和"登录时打开"的启动项、运行时、Xpra 客户端和 `PATH` 条目。`~/.pvm` 下的虚拟机磁盘、密钥和配置会保留。
 
@@ -85,9 +87,9 @@ pvm 支持 arm64 的 macOS、amd64 的 Linux，以及 amd64 的 Windows。
 
 Windows 有两种后端，通过 `PVM_BACKEND` 或 `~/.pvm/config.yaml` 中的 `backend` 选择：
 
-- `native`：Windows 版 daemon 直接运行 Windows QEMU，启用 Windows Hypervisor Platform 时使用 WHPX。Windows QEMU 没有 virtio-9p，因此 `/share` 关闭；宿主机目录请用[工作区](#工作区)。
+- `native`：Windows 版 daemon 直接运行 Windows QEMU，启用 Windows Hypervisor Platform 时使用 WHPX。所有 Windows 版 QEMU 都没有 virtio-9p（pvm-qemu 构建和 MSYS2 的都没有），因此 `/share` 关闭；宿主机目录请用[工作区](#工作区)。
 - `wsl`：命令转发给 WSL2 中的 `pvm`，支持完整的 `/share`、额外挂载，以及（可用时的）KVM。
-- `auto`（默认）：优先使用正在运行的原生 daemon 或原生 QEMU，否则在 WSL2 装有 pvm 时使用 WSL2。
+- `auto`（默认）：原生 daemon 正在运行或已设置原生 QEMU 构建时用原生模式，否则在 WSL2 装有 pvm 时用 WSL2，再否则用原生模式。`auto` 选中 WSL2 时如果要设置原生 QEMU，运行 `PVM_BACKEND=native pvm qemu install`，或使用 PVM Desktop 的 QEMU 页面。
 
 加速、DNS 和 WSL2 嵌套虚拟化的设置见 [SKILL.md](SKILL.md)。
 
@@ -195,7 +197,7 @@ pvm workspace rm web
 
 ### Windows 安装包
 
-每个发布都附带 `pvm_windows_amd64_setup.exe` 和 `pvm_windows_amd64_setup.msi`：按用户安装、不需要管理员权限，一步装好 pvm、PVM Desktop、自带的 QEMU 运行时和 `pvm app` 所需的 Xpra 客户端。替换文件前会检测正在运行的 pvm，卸载时保留你的虚拟机。见[在 Windows 上安装](#windows)。
+每个发布都附带 `pvm_windows_amd64_setup.exe` 和 `pvm_windows_amd64_setup.msi`：按用户安装、不需要管理员权限，一步装好 pvm、PVM Desktop、固定版本的 pvm-qemu 构建和 `pvm app` 所需的 Xpra 客户端。替换文件前会检测正在运行的 pvm，卸载时保留你的虚拟机。见[在 Windows 上安装](#windows)。
 
 ### PVM Desktop
 
@@ -222,6 +224,25 @@ PVM Desktop 是一个图形窗口，覆盖最常用的操作，用于采用原�
 控制面: pvm CLI -> pvm daemon -> gateway 虚拟机和开发虚拟机
 数据面: 开发虚拟机 -> gateway 虚拟机 -> WireGuard 隧道 -> VPS 上的出口 agent 或 Cloudflare WARP -> 互联网
 ```
+
+## QEMU
+
+pvm 只按绝对路径运行你用 `pvm qemu` 选定的 QEMU 构建，从不在 PATH 中查找，也不会自行换用其他构建。多个构建并存在 `~/.pvm/runtime/qemu/builds` 下，其中一个是默认构建。QEMU 有两种来源：
+
+- **项目构建**：由 [pvm-qemu](https://github.com/BitterOrange/pvm-qemu) 项目从签名的上游源码构建，每个发布都附带完整源码。只有归档的 SHA-256 与 pvm 发布中固定的值一致时，pvm 才会安装它；不需要管理员权限或 `gh`。这些不是 QEMU 官方发行版，pvm-qemu 与 QEMU 项目没有关联。
+- **官方构建**：由你自己通过平台渠道安装的 QEMU：macOS 用 Homebrew（`brew install qemu`），Linux 用发行版软件包（8.2 或更新版本，例如 `sudo apt install qemu-system-x86 qemu-utils`），Windows 用 qemu.org 链接的 MSYS2 UCRT64（`pacman -S mingw-w64-ucrt-x86_64-qemu`）。
+
+```bash
+pvm qemu                                # 构建列表、默认构建、推荐的固定版本和残留目录
+pvm qemu install -y                     # 安装推荐的项目构建
+pvm qemu install --file pvm-qemu-11.1.3-pvm1-linux-amd64.tar.gz -y   # 离线安装已下载的归档
+pvm qemu use official                   # Homebrew、发行版或 MSYS2 的 QEMU
+pvm qemu check --default                # 退出码 0 正常，3 尚未设置，1 检查失败
+pvm qemu rm 11.1.3-pvm1 -y              # 移除非默认构建
+pvm qemu gc -y                          # 清理旧版 pvm 留下的目录
+```
+
+每个构建在首次使用前和二进制变化后，都要通过最低版本、加速器与设备探测、用 pvm 自己的参数试启动和固件检查（macOS 上还要检查 hypervisor entitlement）；文件被改动过的项目构建会被拒绝。下载遵循 `HTTPS_PROXY`、`HTTP_PROXY` 和 `NO_PROXY`，中断后可以续传。daemon 没有 QEMU 也能运行，并且无需重启就能识别 `pvm qemu install` 或 `use` 的结果；在此之前，创建或启动虚拟机会失败并给出要运行的命令。RAM 快照只能恢复到写入它的同一构建。旧版 pvm 安装的 QEMU 与固定构建一致时会被收编为项目构建；其他旧目录保持不动，留给 `pvm qemu gc` 处理。
 
 ## 支持的镜像和宿主机
 
@@ -259,7 +280,7 @@ pvm exit client-config my-exit --output phone.conf
 - [SKILL.md](SKILL.md)：面向 agent 和人的完整使用手册；`pvm skill` 会输出内嵌的副本。
 - [SECURITY.md](SECURITY.md)：宿主机/虚拟机信任边界、凭据、镜像来源和网络验证；`pvm security` 会输出内嵌的副本。
 - [AGENTS.md](AGENTS.md)：仓库结构、构建与测试流程以及开发规则。
-- `pvm upgrade` 会校验发布包、保存恢复点、升级已安装的二进制和自带的 QEMU 运行时、重启正在运行的 daemon，并尝试恢复之前所有正在运行的用户虚拟机。用 `--no-restart` 只替换二进制和运行时，用 `pvm upgrade --rollback` 恢复保存的二进制、QEMU 运行时和虚拟机恢复计划。在 Windows 上，包含 QEMU 时 `--no-restart` 要求没有正在运行的虚拟机；省略该参数，pvm 会在替换运行时前停止 daemon，并在之后恢复虚拟机计划。设置 `PVM_SKIP_QEMU=1` 则只升级 pvm。
+- `pvm upgrade` 会校验发布包、确认新版本接受你的默认 QEMU 构建、保存恢复点、替换已安装的二进制、重启正在运行的 daemon，并尝试恢复之前所有正在运行的用户虚拟机。它从不改动 QEMU 或 PVM Desktop。用 `--no-restart` 只替换二进制（之后运行 `pvm daemon restart`），用 `pvm upgrade --rollback` 恢复保存的二进制和虚拟机恢复计划。`--to` 不接受低于 v1.4.0 的版本；请改用 `--rollback` 或该版本的安装包。
 - `pvm audit dev1 --privacy`、`pvm doctor` 和 `pvm route explain dev1 example.com` 只检查本地配置，不启动 daemon，也不发起网络探测；输出中的可识别信息会被脱敏。
 - 自动更新检查默认关闭。在 `~/.pvm/config.yaml` 中设置 `update_check: true` 或设置 `PVM_UPDATE_CHECK=1` 可开启；`PVM_NO_UPDATE_CHECK=1` 可关闭。
 - 如需使用独立信任的镜像签名密钥，执行 `pvm image fetch ubuntu:26.04 --keyring /trusted/ubuntu-cloudimage.gpg`。这需要 `gpgv`；pvm 不会自动下载或信任任何密钥。
@@ -274,7 +295,7 @@ go install mvdan.cc/garble@v0.18.0
 go test ./...
 ```
 
-在 Windows 上，先安装 Git for Windows、Go 1.27.4 和 garble v0.18.0，然后在 PowerShell 中运行包装脚本。它通过 Git Bash 运行 `script/build.sh` 并生成 `pvm.exe`。Windows 上不打包自带的 QEMU（该运行时由 `script/qemu/pack-windows-runtime.sh` 单独构建），因此包装脚本默认设置 `PVM_PACK_QEMU=0`，继续使用 `~/.pvm/runtime` 下已安装的运行时。
+在 Windows 上，先安装 Git for Windows、Go 1.27.4 和 garble v0.18.0，然后在 PowerShell 中运行包装脚本。它通过 Git Bash 运行 `script/build.sh` 并生成 `pvm.exe`。所有构建都不包含 QEMU：请用 `pvm qemu install` 或 `pvm qemu use official` 设置。
 
 ```powershell
 go install mvdan.cc/garble@v0.18.0
@@ -286,6 +307,6 @@ go install mvdan.cc/garble@v0.18.0
 
 不要在 Windows 宿主机上运行完整的 `go test ./...`。测试套件按 Unix 编写（文件权限位、`/tmp` 等路径、符号链接，以及 `ip`、`gh`、`bash` 等工具），在 Windows 上会有大量与改动无关的失败，而且 `internal/cli` 的测试会不断重新拉起自身，留下大量 `cli.test.exe` 进程。在 Windows 上只运行与改动相关的定向测试，例如 `go test ./internal/qemu -run Accel`；完整测试以 Linux 或 macOS（CI 或 WSL2）为准。
 
-CI 对每个提交在各原生平台上各测试、构建一次，缓存 Go 和构建工具，QEMU 打包和签名只在发布时进行。发布可以复用同一提交在 master 上成功运行时已验证的产物。Linux namespace 测试必须实际运行，不能跳过。
+CI 对每个提交在各原生平台上各测试、构建一次，缓存 Go 和构建工具，并按发布资产和证明核对固定的 pvm-qemu 构建。本仓库不构建、不打包 QEMU。发布可以复用同一提交在 master 上成功运行时已验证的产物。Linux namespace 测试必须实际运行，不能跳过。
 
 安全边界：用户虚拟机共享同一个二层网络；全局共享目录和额外的宿主机挂载是显式的信任边界。它们不是相互隔离的不可信租户。显式的 direct/internal 规则可以绕过默认出口。保证、限制和部署检查见 [SECURITY.md](SECURITY.md)。

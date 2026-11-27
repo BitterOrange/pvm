@@ -33,3 +33,5 @@ func HostMemMB() int {
 	}
 	return int(ms.TotalPhys >> 20)
 }
+
+func smallECAM() bool { return false }
