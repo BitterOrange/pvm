@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os/exec"
 
+	"github.com/huangzheng2016/pvm/internal/native"
 	"github.com/huangzheng2016/pvm/internal/qemu"
 	"github.com/huangzheng2016/pvm/internal/vm"
 )
@@ -74,9 +75,11 @@ func (s *Server) handleResize(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, fmt.Errorf("cpus %d out of range [1,64]", req.CPUs))
 		return
 	}
-	if req.MemMB != 0 && (req.MemMB < 128 || req.MemMB > 1048576) {
-		writeErr(w, 400, fmt.Errorf("mem_mb %d out of range [128,1048576]", req.MemMB))
-		return
+	if req.MemMB != 0 {
+		if err := checkMemMB(req.MemMB, hostMemMB()); err != nil {
+			writeErr(w, 400, err)
+			return
+		}
 	}
 	if st, err := s.instance(spec).Running(); err != nil {
 		writeErr(w, 500, err)
@@ -152,4 +155,18 @@ func (s *Server) handleResize(w http.ResponseWriter, r *http.Request) {
 		resp["note"] = "the guest grows its partition and filesystem to the new size automatically on the next boot (cloud-init)"
 	}
 	writeJSON(w, 200, resp)
+}
+
+// hostMemMB is replaced in tests, whose limits must not depend on the
+// machine running them.
+var hostMemMB = native.HostMemMB
+
+// checkMemMB bounds guest memory by the host's physical memory: HVF and
+// KVM allocate guest RAM lazily, so an oversized VM starts and then drives
+// the host into memory exhaustion instead of failing at launch.
+func checkMemMB(mb, hostMB int) error {
+	if mb < 128 || mb > hostMB {
+		return fmt.Errorf("mem_mb %d out of range [128,%d] (this host's physical memory)", mb, hostMB)
+	}
+	return nil
 }

@@ -104,6 +104,8 @@ type Server struct {
 
 	// syncForwards replaces syncGatewayForwardsQMP in tests.
 	syncForwards func(clusterID int) error
+	// applyWait replaces waitGatewayApplied in tests without a gateway agent.
+	applyWait func(ctx context.Context, gw *vm.Spec, sum string) error
 
 	wsMountOnce sync.Once
 	wsMount     *mountSupervisor
@@ -603,8 +605,8 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, fmt.Errorf("cpus %d out of range [1,%d]", req.CPUs, maxCPUs))
 		return
 	}
-	if req.MemMB < 128 || req.MemMB > 1048576 {
-		writeErr(w, 400, fmt.Errorf("mem_mb %d out of range [128,1048576]", req.MemMB))
+	if err := checkMemMB(req.MemMB, hostMemMB()); err != nil {
+		writeErr(w, 400, err)
 		return
 	}
 	if req.DiskGB < 1 || req.DiskGB > 4096 {

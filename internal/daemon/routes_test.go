@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/huangzheng2016/pvm/internal/exit"
 	"github.com/huangzheng2016/pvm/internal/vm"
@@ -389,5 +390,43 @@ func TestApplyPendingRegion(t *testing.T) {
 	}
 	if saved, _ := vm.Load(s.P, "dev1"); saved == nil || saved.RegionPending {
 		t.Fatal("the mark must be cleared once the region is settled")
+	}
+}
+
+func TestSwitchVMRouteRunningRegionSSHFailureDefers(t *testing.T) {
+	s := newPushTestServer(t)
+	old := regionSSHTimeout
+	regionSSHTimeout = time.Second
+	t.Cleanup(func() { regionSSHTimeout = old })
+	if err := exit.SaveEntry(filepath.Join(s.P.Home, "exits"), &exit.Entry{
+		Name: "my-exit", Server: "vps.example.com:18443", Transport: "udp", AutoTZ: "Asia/Tokyo",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec := &routeOpsRecorder{running: true}
+	res, err := s.switchVMRoute(&vm.Spec{Name: "dev1", ClusterID: 1}, "my-exit", "", rec.ops())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"running", "stop", "setExit:my-exit", "push", "start", "deferRegion"}
+	if !reflect.DeepEqual(rec.events, want) {
+		t.Fatalf("call order = %v, want %v", rec.events, want)
+	}
+	if !strings.Contains(res.note, "pending (vm unreachable via ssh: ") || !strings.HasSuffix(res.note, "retried when dev1 next starts") {
+		t.Fatalf("note must carry the ssh error and the retry, got %q", res.note)
+	}
+}
+
+func TestRegionRetryable(t *testing.T) {
+	for note, want := range map[string]bool{
+		`region profile for "my-exit" pending (vm unreachable via ssh: x): tz=UTC locale=en_US.UTF-8`: true,
+		`region apply failed at "sudo locale-gen x": exit status 1 ()`:                                true,
+		"region applied: tz=UTC locale=en_US.UTF-8":                                                   false,
+		"skip region apply: bad tz":                                                                   false,
+		"":                                                                                            false,
+	} {
+		if got := regionRetryable(note); got != want {
+			t.Errorf("regionRetryable(%q) = %v, want %v", note, got, want)
+		}
 	}
 }

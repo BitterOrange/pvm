@@ -32,6 +32,9 @@ func TestResizeSetsCPUsAndMemory(t *testing.T) {
 		return loaded
 	}
 
+	oldHost := hostMemMB
+	hostMemMB = func() int { return 16384 }
+	defer func() { hostMemMB = oldHost }()
 	for body, want := range map[string]string{
 		`{}`:                          "nothing to change",
 		`{"cpus":65}`:                 "cpus 65 out of range",
