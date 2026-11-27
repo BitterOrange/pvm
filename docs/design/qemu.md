@@ -1,6 +1,6 @@
 # QEMU builds: official channels and pvm-qemu
 
-Status: phase 0 is done. pvm-qemu `11.1.3-pvm1` was built in CI for all three hosts and validated under pvm v1.3.6 on WHPX, under KVM and TCG in GitHub Actions, and on real HVF on an M1 Mac mini with macOS 27.2.1, where pvm v1.3.6 needed its gateway cut to 15 root ports (see [Phase 0](#phase-0-pvm-qemu-1113-pvm1)). The four [Directions](#directions) were chosen on 2026-11-25 and the [Decisions](#decisions) were taken on 2026-11-27. Phase 1a has not started. The code references describe v1.3.6.
+Status: phase 0 is done. pvm-qemu `11.1.3-pvm1` was built in CI for all three hosts and validated under pvm v1.3.6 on WHPX, under KVM and TCG in GitHub Actions, and on real HVF on an M1 Mac mini with macOS 27.2.1, where pvm v1.3.6 needed its gateway cut to 15 root ports (see [Phase 0](#phase-0-pvm-qemu-1113-pvm1)). The four [Directions](#directions) were chosen on 2026-11-25 and the [Decisions](#decisions) were taken on 2026-11-27. Phase 1a shipped in v1.4.0; the MSI experiment on clean Windows snapshots has not run, and the v1.4.0 MSI keeps the `msi-payload\x86_64` layout. Code references before Phase 1a describe v1.3.6.
 
 ## Motivation
 
