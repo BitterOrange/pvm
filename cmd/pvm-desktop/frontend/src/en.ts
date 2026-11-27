@@ -340,7 +340,8 @@ export const en = {
     none: "No exits yet",
     readError: "Cannot read the exits: ",
     add: "Add exit",
-    addAgent: "Agent exit (your own server)",
+    addInvite: "Join with an invite",
+    addAgent: "Agent exit (server and token)",
     addWarp: "Cloudflare WARP",
     defaultGone: (exit: string, command: Node): Part[] => [
       "The default exit " +
@@ -373,13 +374,19 @@ export const en = {
     nameBad: "The name takes letters, digits, - and _, at most 32, starting with a letter.",
     nameTaken: (name: string) => "An exit named " + name + " already exists.",
     server: "Server",
-    serverHint: "The address of a server running pvm exit-agent, as host:port.",
+    serverHint: "The address of a server running pvm-exit or pvm exit-agent, as host:port.",
     serverBad: "The server must be host:port.",
     token: "Token",
-    tokenHint: "The token of that exit-agent. It is handed to pvm in a private file and is not shown or logged.",
+    tokenHint: "A token of that server. It is handed to pvm in a private file and is not shown or logged.",
     tokenBad: "Enter the token, without spaces.",
     probe: "Adding probes the connection, which can take up to two minutes.",
     agentSubmit: "Add exit",
+
+    inviteTitle: "Join an exit with an invite",
+    inviteText: (command: Node): Part[] => ["Paste the one-time invite that ", command, " printed on your server."],
+    invite: "Invite",
+    inviteHint: "It starts with pvmx1: and works once. It is handed to pvm in a private file and is not shown or logged.",
+    inviteBad: "Paste the whole invite: one word starting with pvmx1:.",
 
     warpTitle: "Add a Cloudflare WARP exit",
     warpText: "This registers a new Cloudflare WARP device and uses it as the exit.",

@@ -564,9 +564,11 @@ func (a *App) CreateVM(r CreateRequest) (Task, error) {
 	return a.runTask("Create "+r.Name, append(steps, install...)), nil
 }
 
-// AddExitRequest is the form for a pvm exit-agent node.
+// AddExitRequest is the form for a pvm-exit or pvm exit-agent node: an
+// invite from `pvm-exit invite`, or a server and a token.
 type AddExitRequest struct {
 	Name   string `json:"name"`
+	Invite string `json:"invite"` // pvmx1:...; replaces server and token
 	Server string `json:"server"` // host:port
 	Token  string `json:"token"`
 }
@@ -581,9 +583,9 @@ func checkNewExit(name string) error {
 	return nil
 }
 
-// AddExit hands the token to the CLI in a private file under the run
-// directory, removed when the command ends: a token on the command line
-// would show in the process list.
+// AddExit hands the invite or token to the CLI in a private file under
+// the run directory, removed when the command ends: a secret on the
+// command line would show in the process list.
 func (a *App) AddExit(r AddExitRequest) (Task, error) {
 	if err := a.native(); err != nil {
 		return Task{}, err
@@ -591,30 +593,62 @@ func (a *App) AddExit(r AddExitRequest) (Task, error) {
 	if err := checkNewExit(r.Name); err != nil {
 		return Task{}, err
 	}
+	oneWord := func(s string) bool {
+		return s != "" && !strings.ContainsFunc(s, func(c rune) bool { return unicode.IsSpace(c) || unicode.IsControl(c) })
+	}
+	if r.Invite != "" {
+		if r.Server != "" || r.Token != "" {
+			return Task{}, errors.New("an invite carries the server and token: leave them empty")
+		}
+		if !strings.HasPrefix(r.Invite, "pvmx1:") || !oneWord(r.Invite) {
+			return Task{}, errors.New("the invite must be one pvmx1:... word, as `pvm-exit invite` prints it")
+		}
+		f, err := a.secretFile(r.Invite)
+		if err != nil {
+			return Task{}, errors.New("cannot write the invite file")
+		}
+		defer os.Remove(f)
+		return a.runTask("Add exit "+r.Name, []step{{
+			argv:    []string{"exit", "add", r.Name, "--invite-file", f},
+			display: commandLine("exit", "add", r.Name, "--invite", "<invite>"),
+			secrets: []string{r.Invite},
+		}}), nil
+	}
 	if host, port, err := net.SplitHostPort(r.Server); err != nil || host == "" || port == "" ||
 		strings.HasPrefix(r.Server, "-") || strings.ContainsFunc(r.Server, func(c rune) bool { return unicode.IsSpace(c) || unicode.IsControl(c) }) {
 		return Task{}, errors.New("the server must be host:port")
 	}
-	if r.Token == "" || strings.ContainsFunc(r.Token, func(c rune) bool { return unicode.IsSpace(c) || unicode.IsControl(c) }) {
+	if !oneWord(r.Token) {
 		return Task{}, errors.New("the token must be one word")
 	}
+	f, err := a.secretFile(r.Token)
+	if err != nil {
+		return Task{}, errors.New("cannot write the token file")
+	}
+	defer os.Remove(f)
+	return a.runTask("Add exit "+r.Name, []step{{
+		argv:    []string{"exit", "add", r.Name, "--server", r.Server, "--token-file", f},
+		display: commandLine("exit", "add", r.Name, "--server", r.Server, "--token-file", "<token file>"),
+		secrets: []string{r.Token},
+	}}), nil
+}
+
+// secretFile writes secret to a new private file in the run directory,
+// which RemoveTokenFiles clears if the app ends before the caller does.
+func (a *App) secretFile(secret string) (string, error) {
 	f, err := os.CreateTemp(a.p.Run, tokenFilePattern)
 	if err != nil {
-		return Task{}, err
+		return "", err
 	}
-	defer os.Remove(f.Name())
-	_, err = f.WriteString(r.Token + "\n")
+	_, err = f.WriteString(secret + "\n")
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
 	if err != nil {
-		return Task{}, errors.New("cannot write the token file")
+		os.Remove(f.Name())
+		return "", err
 	}
-	return a.runTask("Add exit "+r.Name, []step{{
-		argv:    []string{"exit", "add", r.Name, "--server", r.Server, "--token-file", f.Name()},
-		display: commandLine("exit", "add", r.Name, "--server", r.Server, "--token-file", "<token file>"),
-		secrets: []string{r.Token},
-	}}), nil
+	return f.Name(), nil
 }
 
 func (a *App) AddWarpExit(name string) (Task, error) {

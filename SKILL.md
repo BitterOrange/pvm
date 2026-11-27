@@ -368,6 +368,7 @@ sudo pvm-exit invite laptop --host vps.example.com --raw         # prints the in
 
 # on the host, paste it on stdin so it stays out of shell history:
 pvm exit add my-exit --invite -
+# or from a private file: pvm exit add my-exit --invite-file invite.txt
 ```
 
 The VPS side:

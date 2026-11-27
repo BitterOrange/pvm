@@ -63,7 +63,25 @@ function addDialog(): void {
       setFieldError(token, /^\S+$/.test(token.value) ? "" : t.exits.tokenBad);
       return ![name, server, token].some((el) => el.hasAttribute("aria-invalid"));
     },
-    onSubmit: () => void act(["exit:" + name.value], () => backend().AddExit({ name: name.value, server: server.value, token: token.value })),
+    onSubmit: () => void act(["exit:" + name.value], () => backend().AddExit({ name: name.value, invite: "", server: server.value, token: token.value })),
+  });
+}
+
+function addInviteDialog(): void {
+  const name = nameInput();
+  const invite = input({ class: "input input--mono", type: "password", placeholder: "pvmx1:..." });
+  dialog({
+    title: [t.exits.inviteTitle],
+    text: t.exits.inviteText(mono("pvm-exit invite")),
+    content: [field(t.exits.name, name), field(t.exits.invite, invite, t.exits.inviteHint), callout("info", "note", t.exits.probe)],
+    submit: t.exits.agentSubmit,
+    validate: () => {
+      setFieldError(name, checkName(name.value));
+      setFieldError(invite, /^pvmx1:\S+$/.test(invite.value.trim()) ? "" : t.exits.inviteBad);
+      return ![name, invite].some((el) => el.hasAttribute("aria-invalid"));
+    },
+    onSubmit: () =>
+      void act(["exit:" + name.value], () => backend().AddExit({ name: name.value, invite: invite.value.trim(), server: "", token: "" })),
   });
 }
 
@@ -256,6 +274,7 @@ export function render(): HTMLElement {
       menuButton(
         t.exits.add,
         [
+          { label: t.exits.addInvite, icon: "server", action: addInviteDialog },
           { label: t.exits.addAgent, icon: "server", action: addDialog },
           { label: t.exits.addWarp, icon: "cloud", action: addWarpDialog },
         ],

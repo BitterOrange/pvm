@@ -144,8 +144,9 @@ func exitsDir() (string, error) {
 }
 
 func exitAdd(args []string) int {
-	fs := newFlagSet("exit add", "<name> --invite <pvmx1:...|-> | --server host:port --token-file <file> [--fingerprint <sha256>] [--transport auto|udp|tcp] [--tz TZ] [--locale L]")
+	fs := newFlagSet("exit add", "<name> --invite <pvmx1:...|-> | --invite-file <file> | --server host:port --token-file <file> [--fingerprint <sha256>] [--transport auto|udp|tcp] [--tz TZ] [--locale L]")
 	invite := fs.String("invite", "", "one-time invite from `pvm-exit invite` (- reads it from stdin); replaces --server, --token and --fingerprint")
+	inviteFile := fs.String("invite-file", "", "private file containing the invite")
 	server := fs.String("server", "", "control plane host:port")
 	token := fs.String("token", "", "control plane token (prefer --token-file)")
 	tokenFile := fs.String("token-file", "", "private file containing the control token")
@@ -170,6 +171,19 @@ func exitAdd(args []string) int {
 			return 2
 		}
 		name = fs.Arg(0)
+	}
+	if *inviteFile != "" {
+		if *invite != "" {
+			return fatalf("pass --invite or --invite-file, not both")
+		}
+		b, err := os.ReadFile(*inviteFile)
+		if err != nil {
+			return fatalf("read invite file: %v", err)
+		}
+		*invite = strings.TrimSpace(string(b))
+		if *invite == "" {
+			return fatalf("invite file %s is empty", *inviteFile)
+		}
 	}
 	var inv *exit.Invite
 	if *invite != "" {
