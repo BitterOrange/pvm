@@ -2,12 +2,15 @@ package gateway
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/huangzheng2016/pvm/internal/exit"
+	"github.com/huangzheng2016/pvm/internal/gw/rules"
 )
 
 // RenderNFT renders the complete table; applyNetwork disables forwarding
@@ -33,6 +36,16 @@ func RenderNFT(c *Config, uplink, br string, bypassIPs, privateBypassIPs []strin
 	b.WriteString("    type ipv4_addr; flags interval;\n")
 	if len(privateBypassIPs) > 0 {
 		fmt.Fprintf(&b, "    elements = { %s }\n", strings.Join(privateBypassIPs, ", "))
+	}
+	b.WriteString("  }\n")
+	// exit_servers4 holds the in-tunnel exit-agent addresses (filled at
+	// runtime as tunnels come up); proxy_cidr4 the CIDRs a proxy rule
+	// sends to an exit on purpose. Both are exempt from the exit-bound
+	// private-range drop below.
+	b.WriteString("  set exit_servers4 {\n    type ipv4_addr;\n  }\n")
+	b.WriteString("  set proxy_cidr4 {\n    type ipv4_addr; flags interval; auto-merge;\n")
+	if cidrs := proxyRuleCIDRs(c); len(cidrs) > 0 {
+		fmt.Fprintf(&b, "    elements = { %s }\n", strings.Join(cidrs, ", "))
 	}
 	b.WriteString("  }\n")
 	fmt.Fprintf(&b, "  set blocked_direct4 {\n    type ipv4_addr; flags interval;\n    elements = { %s }\n  }\n", strings.Join(exit.BlockedEgressCIDRs(), ", "))
@@ -74,6 +87,7 @@ func RenderNFT(c *Config, uplink, br string, bypassIPs, privateBypassIPs []strin
 		fmt.Fprintf(&b, "    oifname { %s } masquerade\n", quotedTunnels(c.Exits))
 	}
 	fmt.Fprintf(&b, "  }\n")
+	writePoolGuard(&b, c, uplink)
 	b.WriteString("  chain prerouting {\n")
 	b.WriteString("    type nat hook prerouting priority -100; policy accept;\n")
 	for _, m := range c.Maps {
@@ -152,6 +166,14 @@ func RenderNFT(c *Config, uplink, br string, bypassIPs, privateBypassIPs []strin
 	// but lose all external egress (both uplink and tunnels) immediately.
 	fmt.Fprintf(&b, "    iifname %q ip saddr @paused4 oifname != %q drop\n", br, br)
 	fmt.Fprintf(&b, "    iifname %q ip saddr @unverified4 oifname != %q drop\n", br, br)
+	// Exit-bound traffic gets the same metadata and private-range drop as
+	// the uplink: an exit-agent drops these too, but a WARP exit has no
+	// pvm agent behind it.
+	exitBound := fmt.Sprintf("iifname %q oifname != { %q, %q }", br, br, uplink)
+	fmt.Fprintf(&b, "    %s ip daddr @exit_servers4 accept\n", exitBound)
+	fmt.Fprintf(&b, "    %s ip daddr @proxy_cidr4 accept\n", exitBound)
+	fmt.Fprintf(&b, "    %s ip daddr 169.254.0.0/16 counter name pvm_drop_meta drop\n", exitBound)
+	fmt.Fprintf(&b, "    %s ip daddr @blocked_direct4 counter name pvm_drop_private drop\n", exitBound)
 	fmt.Fprintf(&b, "    iifname %q oifname %q ip daddr 10.0.2.0/24 drop\n", br, uplink)
 	// Direct VMs and direct-domain bypasses reach the host uplink via slirp:
 	// keep them off the host LAN, slirp loopback and link-local unless an
@@ -215,6 +237,35 @@ func quotedTunnels(exits map[string]ExitDef) string {
 }
 
 // ApplyNFT feeds the ruleset to `nft -f`.
+// writePoolGuard drops packets from slirp's host address (10.0.2.2, where
+// host forwards arrive) to a pool port that has no map, before conntrack
+// sees them. Otherwise a packet that arrives between the host forward and
+// the map's DNAT leaves an un-NATed conntrack entry, and a UDP client that
+// keeps sending from the same port stays on it and never reaches the VM;
+// after a map is removed, the same rule ends its live flows.
+func writePoolGuard(b *strings.Builder, c *Config, uplink string) {
+	if c.PoolSize <= 0 {
+		return
+	}
+	mapped := map[string][]string{}
+	for _, m := range c.Maps {
+		proto := m.Proto
+		if proto == "" {
+			proto = "tcp"
+		}
+		mapped[proto] = append(mapped[proto], strconv.Itoa(m.HostPort))
+	}
+	b.WriteString("  chain pool_guard {\n")
+	b.WriteString("    type filter hook prerouting priority raw; policy accept;\n")
+	for _, proto := range []string{"tcp", "udp"} {
+		if ports := mapped[proto]; len(ports) > 0 {
+			fmt.Fprintf(b, "    iifname %q ip saddr 10.0.2.2 %s dport { %s } accept\n", uplink, proto, strings.Join(ports, ", "))
+		}
+	}
+	fmt.Fprintf(b, "    iifname %q ip saddr 10.0.2.2 meta l4proto { tcp, udp } th dport %d-%d drop\n", uplink, c.PoolBase, c.PoolBase+c.PoolSize-1)
+	b.WriteString("  }\n")
+}
+
 func ApplyNFT(ruleset string) error {
 	f, err := os.CreateTemp("", "pvm-*.nft")
 	if err != nil {
@@ -231,4 +282,24 @@ func ApplyNFT(ruleset string) error {
 		return fmt.Errorf("nft -f: %v\n%s\nruleset:\n%s", err, out, ruleset)
 	}
 	return nil
+}
+
+// proxyRuleCIDRs lists the CIDRs of proxy rules that name an exit.
+func proxyRuleCIDRs(c *Config) []string {
+	var out []string
+	for _, r := range c.Rules {
+		if r.Type == rules.CIDR && r.Action == rules.Proxy && r.Exit != "" {
+			out = append(out, r.Pattern)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// addExitServer exempts one in-tunnel exit-agent address from the
+// exit-bound private-range drop.
+func addExitServer(ip string) {
+	if out, err := exec.Command("nft", "add", "element", "inet", "pvm", "exit_servers4", "{", ip, "}").CombinedOutput(); err != nil {
+		log.Printf("nft exit_servers4 add %s: %v (%s)", ip, err, strings.TrimSpace(string(out)))
+	}
 }

@@ -56,11 +56,14 @@ const (
 	rulePrefVMDirect       = 102  // direct VM -> main (cluster-default override)
 	rulePrefClusterDefault = 103  // cluster cidr -> default exit table
 	fwMarkBase             = 0x99 // exit idx i uses mark fwMarkBase+i, table 100+i
-	ruleTableBase          = 100
-	exitPeerKeyDir         = "/etc/pvm/exit-keys"
-	exitProbeTimeout       = 5 * time.Second
-	watchdogPeriod         = 10 * time.Second
-	watchdogMaxDown        = 2 // consecutive failed probes before re-enroll
+	// mihomoMark is MarkForExit's answer for an up gateway-local Mihomo
+	// exit: a loopback dial with no tunnel mark.
+	mihomoMark       = 0
+	ruleTableBase    = 100
+	exitPeerKeyDir   = "/etc/pvm/exit-keys"
+	exitProbeTimeout = 5 * time.Second
+	watchdogPeriod   = 10 * time.Second
+	watchdogMaxDown  = 2 // consecutive failed probes before re-enroll
 )
 
 var exitProbeDial = func(ctx context.Context, network, address string, mark int) (net.Conn, error) {
@@ -137,6 +140,9 @@ type exitTunnel struct {
 	// response (domain-connect/speed target); it cannot be derived from
 	// tunIP because the tunnel subnet is a /16.
 	serverTunIP string
+	// onServer reports serverTunIP once the tunnel is up, so the nft
+	// exemption for in-tunnel probes follows re-enrolls.
+	onServer func(ip string)
 
 	policyBlocked   bool
 	lastPolicyCheck time.Time
@@ -190,6 +196,7 @@ type exitManager struct {
 	onEvict         func(ip string)
 	onPrivateBypass func(ip string)
 	onPrivateEvict  func(ip string)
+	onTunnelServer  func(ip string)
 }
 
 const (
@@ -475,6 +482,23 @@ func (m *exitManager) BypassList() []string {
 
 // PrivateBypassList snapshots the private/reserved destinations explicitly
 // permitted past blocked_direct4.
+// TunnelServerList returns the in-tunnel server addresses of the tunnels
+// that are up, for the nft exit_servers4 set.
+func (m *exitManager) TunnelServerList() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []string
+	for _, t := range m.tuns {
+		t.mu.RLock()
+		if t.dev != nil && t.serverTunIP != "" {
+			out = append(out, t.serverTunIP)
+		}
+		t.mu.RUnlock()
+	}
+	sort.Strings(out)
+	return out
+}
+
 func (m *exitManager) PrivateBypassList() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -586,7 +610,7 @@ func (m *exitManager) ensureLocked(name string, def ExitDef, idx int) {
 		// the indexes): rebuild so ifname/mark/table match the rules.
 		m.teardownLocked(t, !sameExitPeer(t.def, def))
 	}
-	t := &exitTunnel{name: name, def: def, idx: idx, stop: make(chan struct{}), done: make(chan struct{})}
+	t := &exitTunnel{name: name, def: def, idx: idx, stop: make(chan struct{}), done: make(chan struct{}), onServer: m.onTunnelServer}
 	m.tuns[name] = t
 	go m.runTunnel(t)
 }
@@ -759,6 +783,9 @@ persistent_keepalive_interval=25
 	t.dev, t.td, t.tunIP = dev, td, resp.tunnelIP
 	t.serverTunIP, t.server = resp.serverIP, server
 	t.mu.Unlock()
+	if t.onServer != nil && resp.serverIP != "" {
+		t.onServer(resp.serverIP)
+	}
 	log.Printf("exit %s: tunnel up on %s (%s, tunnel ip %s, mtu %d)", t.name, ifName, t.def.Transport, resp.tunnelIP, mtu)
 	return nil
 }
@@ -936,7 +963,7 @@ func (m *exitManager) MarkForExit(name string) int {
 	defer m.mu.Unlock()
 	if port := m.mihomoPorts[name]; port > 0 {
 		if m.mihomoUp[name] {
-			return 0 // loopback dial to gateway-local Mihomo; no tunnel mark
+			return mihomoMark
 		}
 		return -1
 	}

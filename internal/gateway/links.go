@@ -48,6 +48,10 @@ func (a *Agent) applyNetwork(c *Config) error {
 		_ = run("sysctl", "-w", "net.ipv4.ip_forward=0")
 		return err
 	}
+	// The rebuilt table starts with an empty exit_servers4.
+	for _, ip := range a.exits.TunnelServerList() {
+		addExitServer(ip)
+	}
 	return os_WriteSysctl()
 }
 

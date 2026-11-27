@@ -7,6 +7,7 @@ import (
 	"net"
 	"os/exec"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/huangzheng2016/pvm/internal/netcheck"
@@ -22,6 +23,22 @@ type ExitProbeResult struct {
 // exit's policy-routing mark (or main table when exitName is "direct"/"").
 func ProbeExit(ctx context.Context, c *Config, exitName string, wantGeo bool) (*ExitProbeResult, error) {
 	mark := -1
+	if def, ok := c.Exits[exitName]; ok && def.Provider == "mihomo" && def.MihomoPort > 0 {
+		// A Mihomo exit has no tunnel mark; sample through its SOCKS
+		// listener, letting the node resolve the echo service's name.
+		socks := net.JoinHostPort("127.0.0.1", strconv.Itoa(def.MihomoPort))
+		return probeExitWith(ctx, func(ctx context.Context, _, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			n, err := strconv.Atoi(port)
+			if err != nil {
+				return nil, err
+			}
+			return socks5Dial(ctx, socks, host, n)
+		}, wantGeo)
+	}
 	if exitName != "" && exitName != "direct" {
 		names := make([]string, 0, len(c.Exits))
 		for n := range c.Exits {
@@ -41,6 +58,10 @@ func ProbeExit(ctx context.Context, c *Config, exitName string, wantGeo bool) (*
 		}
 		return d.DialContext(ctx, "tcp4", addr)
 	}
+	return probeExitWith(ctx, dial, wantGeo)
+}
+
+func probeExitWith(ctx context.Context, dial func(context.Context, string, string) (net.Conn, error), wantGeo bool) (*ExitProbeResult, error) {
 	ip, svc, err := netcheck.ProbeExitIP(ctx, dial, nil)
 	if err != nil {
 		return nil, err

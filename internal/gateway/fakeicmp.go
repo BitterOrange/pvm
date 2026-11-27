@@ -152,7 +152,7 @@ func (p *fakeICMP) SetPolicy(eng *gwpolicy.Engine) {
 	p.policy = eng
 	for key, flow := range p.flows {
 		dec := eng.DecideFlow(flow.domain, net.ParseIP(key.dstIP), flow.vm)
-		if dec.Route != flow.route || dec.Exit != flow.exit {
+		if dec.Route != flow.route || dec.Exit != flow.exit || eng.EgressBlocked(flow.vm) {
 			delete(p.flows, key)
 			flow.close()
 		}
@@ -295,7 +295,7 @@ func (p *fakeICMP) openFlow(key fakeICMPKey, src *net.IPAddr, dstIP net.IP, doma
 	var flow *fakeICMPFlow
 	if !p.closed && p.policy != nil {
 		dec := p.policy.DecideFlow(domain, dstIP, vmName)
-		if dec.Route == route && dec.Exit == exitName && (route != gwpolicy.Proxy || p.markFor(exitName) >= 0) {
+		if dec.Route == route && dec.Exit == exitName && !p.policy.EgressBlocked(vmName) && (route != gwpolicy.Proxy || p.markFor(exitName) >= 0) {
 			flow = &fakeICMPFlow{key: key, src: src, domain: domain, vm: vmName, route: route, exit: exitName, origID: key.id, upID: p.allocUpID(), up: up, down: down, lastActive: time.Now()}
 			p.flows[key] = flow
 			p.wg.Add(1)
@@ -322,8 +322,8 @@ func (p *fakeICMP) dial(domain string, dstIP net.IP, vmName string) (net.Conn, g
 	if pol == nil {
 		return nil, gwpolicy.Direct, "", fmt.Errorf("policy is not ready")
 	}
-	if pol.IsPaused(vmName) {
-		return nil, gwpolicy.Direct, "", fmt.Errorf("egress is paused for %s", vmName)
+	if pol.EgressBlocked(vmName) {
+		return nil, gwpolicy.Direct, "", fmt.Errorf("egress is blocked for %s (paused or unverified)", vmName)
 	}
 	dec := pol.DecideFlow(domain, dstIP, vmName)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

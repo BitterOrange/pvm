@@ -35,6 +35,9 @@ type Engine struct {
 	vmExit  map[string]string // vmID -> default exit name, "" = direct
 	defExit string            // cluster-wide default exit, "" = direct
 	paused  map[string]bool
+	// unverified holds require-check VMs without a valid lease; like
+	// paused, they lose all external egress.
+	unverified map[string]bool
 }
 
 func New(eng *rules.Engine, pool *dns.Pool) *Engine {
@@ -114,14 +117,29 @@ func (e *Engine) SetPaused(paused map[string]bool) {
 	}
 }
 
-// IsPaused reports whether external egress is administratively paused for vmID.
-func (e *Engine) IsPaused(vmID string) bool {
+// SetUnverified replaces the set of require-check VMs that have no valid
+// verification lease.
+func (e *Engine) SetUnverified(unverified map[string]bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.unverified = make(map[string]bool, len(unverified))
+	for k, v := range unverified {
+		if v {
+			e.unverified[k] = true
+		}
+	}
+}
+
+// EgressBlocked reports whether vmID may not reach anything outside the
+// cluster: its egress is paused, or it requires a check and has no lease.
+// The gateway relays enforce this; nft enforces it for forwarded traffic.
+func (e *Engine) EgressBlocked(vmID string) bool {
 	if e == nil {
 		return false
 	}
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	return e.paused["*"] || e.paused[vmID]
+	return e.paused["*"] || e.paused[vmID] || e.unverified[vmID]
 }
 
 // AllowsPrivateDirect reports whether an explicit intranet-domain rule or an

@@ -62,9 +62,12 @@ func gatewayConfigFromCluster(s *Server, cl *cluster.Cluster) []byte {
 		Paused       map[string]bool    `json:"paused,omitempty"`
 		RequireCheck map[string]bool    `json:"require_check,omitempty"`
 		Exits        map[string]exitDef `json:"exits,omitempty"`
+		PoolBase     int                `json:"pool_base,omitempty"`
+		PoolSize     int                `json:"pool_size,omitempty"`
 	}{
 		CIDR: cl.CIDR, GwIP: cl.GwIP, DNSUpstream: gatewayDNSUpstream(runtime.GOOS),
 		Rules: cl.Rules, VMExits: cl.VMExits, DefaultExit: cl.DefaultExit, Paused: cl.Paused, RequireCheck: cl.RequireCheck,
+		PoolBase: cl.PoolBase, PoolSize: cl.PoolSize,
 	}
 	for _, v := range cl.VMs {
 		doc.VMs = append(doc.VMs, vmEntry{Name: v.Name, MAC: v.MAC, IP: v.IP})

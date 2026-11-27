@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/huangzheng2016/pvm/internal/cluster"
 	"github.com/huangzheng2016/pvm/internal/fsutil"
+	"github.com/huangzheng2016/pvm/internal/gateway"
 	"github.com/huangzheng2016/pvm/internal/native"
 	"github.com/huangzheng2016/pvm/internal/qemu"
 	"github.com/huangzheng2016/pvm/internal/vm"
@@ -418,7 +420,10 @@ func (s *Server) deployGatewayAgentCtx(ctx context.Context, cl *cluster.Cluster)
 	if out, err := s.sshRunCtx(ctx, gwSpec, "sudo install -m 0755 /tmp/pvm-gateway /usr/local/bin/pvm-gateway"); err != nil {
 		return fmt.Errorf("install agent: %v\n%s", err, out)
 	}
-	if err := s.pushGatewayConfigCtx(ctx, cl.ID); err != nil {
+	// The new agent writes the receipt only once it runs, so wait after
+	// the restart.
+	sum, err := s.pushGatewayConfigOpts(ctx, cl.ID, false)
+	if err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
@@ -426,6 +431,9 @@ func (s *Server) deployGatewayAgentCtx(ctx context.Context, cl *cluster.Cluster)
 	}
 	if out, err := s.sshRunCtx(ctx, gwSpec, "sudo systemctl restart pvm-gateway.service"); err != nil {
 		return fmt.Errorf("start agent: %v\n%s", err, out)
+	}
+	if err := s.waitGatewayApplied(ctx, gwSpec, sum); err != nil {
+		return err
 	}
 	log.Printf("gateway %s: agent deployed", cl.Gateway)
 	return nil
@@ -446,15 +454,27 @@ func (s *Server) pushGatewayConfig(clusterID int) error {
 // aborts the gate wait and kills the scp/ssh children, so guest control
 // deadlines and disconnects actually stop the work.
 func (s *Server) pushGatewayConfigCtx(ctx context.Context, clusterID int) error {
+	_, err := s.pushGatewayConfigOpts(ctx, clusterID, true)
+	return err
+}
+
+// pushGatewayConfigOpts installs the rendered config and returns its
+// SHA-256. With wait it returns only once the running gateway agent has
+// applied that config, so a map or route change is enforced when the
+// caller reports success.
+func (s *Server) pushGatewayConfigOpts(ctx context.Context, clusterID int, wait bool) (string, error) {
 	cl := s.Clusters.Get(clusterID)
 	if cl == nil {
-		return fmt.Errorf("cluster %d not found", clusterID)
+		return "", fmt.Errorf("cluster %d not found", clusterID)
 	}
 	gwSpec, err := s.getSpec(cl.Gateway)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return s.renderGatewayConfigLocked(ctx, clusterID, func(cfg []byte) error {
+	var sum string
+	err = s.renderGatewayConfigLocked(ctx, clusterID, func(cfg []byte) error {
+		digest := sha256.Sum256(cfg)
+		sum = hex.EncodeToString(digest[:])
 		// forwards first: once the guest DNATs a pool port, its host side
 		// must already reach the gateway
 		if err := s.syncGatewayForwards(clusterID); err != nil {
@@ -489,10 +509,53 @@ func (s *Server) pushGatewayConfigCtx(ctx context.Context, clusterID int) error 
 		if err != nil {
 			return fmt.Errorf("install config: %v\n%s", err, out)
 		}
+		if wait {
+			if err := s.waitGatewayApplied(ctx, gwSpec, sum); err != nil {
+				return err
+			}
+		}
 		now := time.Now()
 		s.updateClusterStatus(clusterID, func(cs *ClusterStatus) { cs.ConfigPushedAt = &now })
 		return nil
 	})
+	return sum, err
+}
+
+// gatewayApplyTimeout bounds the wait for the agent, which reads its config
+// every 2 seconds and may be bringing up an exit tunnel.
+var gatewayApplyTimeout = 30 * time.Second
+
+// waitGatewayApplied waits until the gateway agent reports that it applied
+// the config with digest sum. A failed step is retried on the agent's next
+// tick, so its error is reported only when it persists to the timeout.
+func (s *Server) waitGatewayApplied(ctx context.Context, gwSpec *vm.Spec, sum string) error {
+	if s.applyWait != nil {
+		return s.applyWait(ctx, gwSpec, sum)
+	}
+	tries := int(gatewayApplyTimeout / (250 * time.Millisecond))
+	// The receipt marshals sha256 first and omits an empty error, so a
+	// success is the digest followed by the closing brace.
+	script := fmt.Sprintf(`i=0; r=; while [ $i -lt %d ]; do r=$(sudo cat %s 2>/dev/null); case "$r" in *'"%s"}'*) printf '%%s' "$r"; exit 0;; esac; sleep 0.25; i=$((i+1)); done; printf '%%s' "$r"; exit 3`, tries, gateway.AppliedPath, sum)
+	out, err := s.sshRunCtx(ctx, gwSpec, script)
+	return appliedResult(out, err, sum)
+}
+
+func appliedResult(out string, runErr error, sum string) error {
+	var a gateway.Applied
+	parsed := json.Unmarshal([]byte(strings.TrimSpace(out)), &a) == nil
+	if runErr == nil && parsed && a.SHA256 == sum && a.Error == "" {
+		return nil
+	}
+	if parsed && a.SHA256 == sum && a.Error != "" {
+		return fmt.Errorf("gateway failed to apply the new config: %s", a.Error)
+	}
+	if parsed && a.SHA256 != "" {
+		return fmt.Errorf("gateway did not apply the new config within %s (it last applied %.12s)", gatewayApplyTimeout, a.SHA256)
+	}
+	if runErr != nil {
+		return fmt.Errorf("gateway did not apply the new config within %s: %v", gatewayApplyTimeout, runErr)
+	}
+	return fmt.Errorf("gateway applied-config receipt unreadable: %q", strings.TrimSpace(out))
 }
 
 // renderGatewayConfigLocked serializes config renders for one cluster

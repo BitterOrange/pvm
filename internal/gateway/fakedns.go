@@ -208,6 +208,11 @@ func (f *fakeDNS) resolveThroughExit(ctx context.Context, name, exit string, loo
 	if mark < 0 {
 		return nil, 0, fmt.Errorf("exit %s: tunnel is down", exit)
 	}
+	if mark == mihomoMark {
+		// A Mihomo exit has no tunnel resolver: answer a fake IP so the
+		// relay hands the name to Mihomo, which resolves it at the node.
+		return nil, gwdns.ExitResolveFake, nil
+	}
 	dcAddr, _ := dcAddrFor(exit)
 	dnsAddr, _ := dnsAddrFor(exit)
 	if lookup == nil {

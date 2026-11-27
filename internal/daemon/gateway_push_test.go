@@ -25,7 +25,7 @@ func newPushTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Server{P: p, Clusters: st, vms: map[string]*vm.Spec{}, mapMu: newMapGate(), syncForwards: noForwardSync}
+	s := &Server{P: p, Clusters: st, vms: map[string]*vm.Spec{}, mapMu: newMapGate(), syncForwards: noForwardSync, applyWait: noApplyWait}
 	return s
 }
 
@@ -207,3 +207,7 @@ func TestRenderGatewayConfigDefaultExit(t *testing.T) {
 // noForwardSync stands in for the QMP forward sync: these tests have no
 // gateway QEMU.
 func noForwardSync(int) error { return nil }
+
+// noApplyWait stands in for the wait on the gateway agent's receipt: these
+// tests have no agent; appliedResult has its own test.
+func noApplyWait(context.Context, *vm.Spec, string) error { return nil }

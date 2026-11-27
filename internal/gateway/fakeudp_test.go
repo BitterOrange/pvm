@@ -526,3 +526,32 @@ func fakeUDPTransparentSender(t *testing.T) {
 		t.Fatalf("reply = %q, want %q", buf[:n], payload)
 	}
 }
+
+func TestFakeUDPSetPolicyClosesUnverifiedFlow(t *testing.T) {
+	eng, pool := newFakeUDPTestPolicy(t)
+	fake := pool.Allocate("example.com")
+	p := newFakeUDP(eng, "10.0.2.3", nil)
+	echo := udpEcho(t)
+	up, err := net.DialUDP("udp4", nil, echo.LocalAddr().(*net.UDPAddr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := fakeUDPKey{srcIP: "192.168.1.10", srcPort: 12345, dstIP: fake.String(), dstPort: 443}
+	p.flows[key] = &fakeUDPFlow{key: key, domain: "example.com", vm: "dev1", route: gwpolicy.Direct, up: up}
+	eng.SetUnverified(map[string]bool{"dev1": true})
+	p.SetPolicy(eng)
+	p.mu.Lock()
+	if len(p.flows) != 0 {
+		p.mu.Unlock()
+		t.Fatal("an unverified VM's flow was retained")
+	}
+	p.mu.Unlock()
+	_ = up.SetReadDeadline(time.Now().Add(time.Second))
+	if _, err := up.Read(make([]byte, 1)); err == nil {
+		t.Fatal("an unverified VM's flow socket was not closed")
+	}
+	if _, _, _, err := p.dial("example.com", &net.UDPAddr{IP: fake, Port: 443}, "dev1"); err == nil {
+		t.Fatal("an unverified VM dialed a new flow")
+	}
+	p.Close()
+}

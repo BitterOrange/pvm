@@ -65,7 +65,7 @@ func TestRenderNFTDirectPrivateIsolation(t *testing.T) {
 	out := RenderNFT(cfg, "enp0s1", "br0", []string{"203.0.113.0/24"}, []string{"192.168.50.0/24"})
 	dnatReply := strings.Index(out, `ip daddr 10.0.2.0/24 ct direction reply ct status dnat accept`)
 	privateAllow := strings.Index(out, `ip daddr @private_bypass4 accept`)
-	privateDrop := strings.Index(out, `ip daddr @blocked_direct4 counter name pvm_drop_private drop`)
+	privateDrop := strings.Index(out, `oifname "enp0s1" ip daddr @blocked_direct4 counter name pvm_drop_private drop`)
 	bypass := strings.Index(out, `ip daddr @bypass4 accept`)
 	directVM := strings.Index(out, `ip saddr 100.99.1.10 oifname "enp0s1" accept`)
 	finalDrop := strings.LastIndex(out, `iifname "br0" oifname "enp0s1" drop`)
