@@ -21,7 +21,7 @@ vm:
   resize        change a stopped vm's disk, vcpus or memory: pvm resize dev1 [40] [--cpus N] [--mem MB]
                 (disk in gb, grow-only; vcpus and memory cannot change while a ram snapshot waits to be restored)
   compact       reclaim unused host disk space (vm must be stopped): pvm compact dev1
-  mount         dynamic host mounts: pvm mount [dev1] [--profile coherent|readahead] [--read-only] /host:/guest | ls [dev1] | rm [dev1] /guest
+  mount         dynamic host mounts: pvm mount [dev1] [--profile coherent|readahead] [--read-only] [--allow-sensitive] /host:/guest | ls [dev1] | rm [dev1] /guest
   ssh           ssh into a vm: pvm ssh [-t|-T] [--yes] [dev1] [cmd...]; inside a workspace it starts in the matching directory
   snapshot      ram snapshots: create <name> | ls [name] | rm <name>
                 (create needs a running vm; rm needs the vm stopped)
@@ -36,6 +36,12 @@ vm:
   default-vm    print, set or clear the default vm: pvm default-vm [dev1|--clear]
   doctor        diagnose local state consistency and permissions (read-only, redacted)
   audit         read-only health audit: pvm audit [dev1] | pvm audit dev1 --privacy (vm, route, tcp/udp/icmp probes, dns, ipv6, timezone, locale)
+  diag          export a redacted diagnostic zip: pvm diag [output.zip] [--offline]
+  check         run active isolation & two-path egress checks: pvm check <vm> [--json]
+  ssh-config    print an OpenSSH config entry (print-only): pvm ssh-config <vm>
+  dashboard     open the read-only web status page: pvm dashboard [--open]
+  job           inspect async operations: pvm job <id> [--wait [duration]] | pvm job ls [--vm NAME]
+  capabilities  print the machine-readable agent contract (offline, --json)
 
 default vm:
   commands shown with [dev1] may leave the vm out. pvm then uses the vm of the
@@ -72,8 +78,9 @@ network:
 image:
   image fetch   download a base image (ubuntu:26.04, debian:13)
   image build   bake a golden image (docker + firefox + xfce desktop preinstalled; ubuntu/debian only)
-                flags: --keep-vm --cpus N --mem MB --disk GB
+                flags: --keep-vm --fresh --cpus N --mem MB --disk GB
   image list    list base and golden images
+  image default show, set or clear the image pvm create uses without --image: [<distro:version>|--clear]
 
 qemu:
   qemu ls       the QEMU builds pvm can run, the default, and leftovers: pvm qemu [ls] [--json]
@@ -156,7 +163,7 @@ func main() {
 		os.Exit(cli.DelegateToWSL(os.Args[1:]))
 	}
 	switch os.Args[1] {
-	case "audit", "doctor", "route", "upgrade", "version", "--version", "-v", "skill", "security", "exit-agent", "agent", "gateway", "qemu", "__snapshot-pipe-out", "__snapshot-pipe-in", "__probe-rtt":
+	case "audit", "capabilities", "diag", "doctor", "route", "upgrade", "version", "--version", "-v", "skill", "security", "exit-agent", "agent", "gateway", "qemu", "__snapshot-pipe-out", "__snapshot-pipe-in", "__probe-rtt":
 	default:
 		cli.MaybeNotifyOldDesktop()
 		cli.MaybeNotifyOldSnapshots()
@@ -234,6 +241,18 @@ func main() {
 		code = cli.CmdDefaultVM(args)
 	case "doctor":
 		code = cli.CmdDoctor(args)
+	case "diag":
+		code = cli.CmdDiag(args)
+	case "check":
+		code = cli.CmdCheck(args)
+	case "ssh-config":
+		code = cli.CmdSSHConfig(args)
+	case "dashboard", "web":
+		code = cli.CmdDashboard(args)
+	case "job":
+		code = cli.CmdJob(args)
+	case "capabilities":
+		code = cli.CmdCapabilities(args)
 	case "gateway":
 		fmt.Println("gateway is managed automatically by the pvm daemon; no manual action is required")
 	default:

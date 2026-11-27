@@ -322,6 +322,9 @@ func (p *fakeICMP) dial(domain string, dstIP net.IP, vmName string) (net.Conn, g
 	if pol == nil {
 		return nil, gwpolicy.Direct, "", fmt.Errorf("policy is not ready")
 	}
+	if pol.IsPaused(vmName) {
+		return nil, gwpolicy.Direct, "", fmt.Errorf("egress is paused for %s", vmName)
+	}
 	dec := pol.DecideFlow(domain, dstIP, vmName)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -332,6 +335,9 @@ func (p *fakeICMP) dial(domain string, dstIP net.IP, vmName string) (net.Conn, g
 		}
 		ip, err := lookup(ctx, domain)
 		if err != nil {
+			return nil, dec.Route, dec.Exit, err
+		}
+		if err := checkDirectTarget(pol, domain, ip); err != nil {
 			return nil, dec.Route, dec.Exit, err
 		}
 		up, err := p.dialRaw(ctx, ip.String(), -1)

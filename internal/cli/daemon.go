@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"runtime"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	"github.com/huangzheng2016/pvm/internal/cluster"
 	"github.com/huangzheng2016/pvm/internal/config"
 	"github.com/huangzheng2016/pvm/internal/daemon"
+	"github.com/huangzheng2016/pvm/internal/diaglog"
 	"github.com/huangzheng2016/pvm/internal/paths"
 	"github.com/huangzheng2016/pvm/internal/qemu"
 )
@@ -52,6 +54,9 @@ func warnTCG(c *daemon.Client) {
 }
 
 func CmdDaemon(args []string) int {
+	if len(args) > 0 && args[0] == "status" {
+		args = append([]string{"status"}, scanJSONFlag(args[1:])...)
+	}
 	if len(args) == 0 {
 		return fatalf("usage: pvm daemon run|start|stop|status|restart|install|uninstall")
 	}
@@ -94,7 +99,7 @@ func CmdDaemon(args []string) int {
 		os.Remove(p.DaemonStopMark())
 		c := daemon.NewClient(p)
 		if c.Healthy() {
-			if err := c.Post("/v1/shutdown", nil, nil); err != nil {
+			if err := c.Post("/v1/shutdown?restore=1", nil, nil); err != nil {
 				return fatalf("shutdown: %v", err)
 			}
 			for i := 0; i < 900 && c.Healthy(); i++ {
@@ -115,12 +120,19 @@ func CmdDaemon(args []string) int {
 	case "status":
 		c := daemon.NewClient(p)
 		if !c.Healthy() {
+			if jsonOutput {
+				return failErr(writeJSONOut(map[string]any{"status": "completed", "data": map[string]any{"running": false}}))
+			}
 			fmt.Println("daemon: not running")
 			return 0
 		}
 		var st map[string]any
 		if err := c.Get("/v1/status", &st); err != nil {
 			return fatalf("%v", err)
+		}
+		if jsonOutput {
+			st["running"] = true
+			return failErr(writeJSONOut(map[string]any{"status": "completed", "data": st}))
 		}
 		fmt.Printf("daemon: running\n  pid:     %v\n  version: %v\n  ready:   %v\n  uptime:  %v\n",
 			st["pid"], st["version"], st["ready"], st["uptime"])
@@ -156,6 +168,10 @@ func CmdDaemon(args []string) int {
 }
 
 func daemonRun(p *paths.Paths) int {
+	if lw, err := diaglog.NewRotateWriter(p.DaemonLog(), diaglog.DefaultDaemonMaxBytes, 2, 0o600); err == nil {
+		defer lw.Close()
+		log.SetOutput(diaglog.NewRedactWriter(lw, diaglog.RedactorForPaths(p)))
+	}
 	cfg, err := config.Load(p.ConfigFile())
 	if err != nil {
 		return fatalf("config: %v", err)

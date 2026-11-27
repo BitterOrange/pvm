@@ -58,13 +58,14 @@ type vmInfoView struct {
 
 type imageBuildOptions struct {
 	spec            string
-	keep            bool
+	keep, fresh     bool
 	cpus, mem, disk int
 }
 
 func parseImageBuildArgs(args []string) (imageBuildOptions, bool) {
-	fs := newFlagSet("image build", "<distro:version> [--keep-vm] [--cpus 4] [--mem 6144] [--disk 25]")
-	keep := fs.Bool("keep-vm", false, "keep the build VM for debugging")
+	fs := newFlagSet("image build", "<distro:version> [--keep-vm] [--fresh] [--cpus 4] [--mem 6144] [--disk 25]")
+	keep := fs.Bool("keep-vm", false, "keep the build VM after success for debugging")
+	fresh := fs.Bool("fresh", false, "discard any resumable build VM and start clean")
 	cpus := fs.Int("cpus", 4, "build vm vcpus")
 	mem := fs.Int("mem", 6144, "build vm memory MB")
 	disk := fs.Int("disk", 25, "build vm disk GB")
@@ -75,7 +76,7 @@ func parseImageBuildArgs(args []string) (imageBuildOptions, bool) {
 		fs.Usage()
 		return imageBuildOptions{}, false
 	}
-	return imageBuildOptions{spec: fs.Arg(0), keep: *keep, cpus: *cpus, mem: *mem, disk: *disk}, true
+	return imageBuildOptions{spec: fs.Arg(0), keep: *keep, fresh: *fresh, cpus: *cpus, mem: *mem, disk: *disk}, true
 }
 
 func CmdImage(args []string) int {
@@ -116,8 +117,14 @@ func CmdImage(args []string) int {
 		if !ok {
 			return 2
 		}
-		return cmdImageBuild(p, opts.spec, opts.keep, opts.cpus, opts.mem, opts.disk)
+		return cmdImageBuild(p, opts.spec, opts.keep, opts.fresh, opts.cpus, opts.mem, opts.disk)
+	case "default":
+		return cmdImageDefault(p, args[1:])
 	case "list":
+		rest := scanJSONFlag(args[1:])
+		if len(rest) != 0 {
+			return 2
+		}
 		imgs, err := image.List(p.Images)
 		if err != nil {
 			return fatalf("%v", err)
@@ -125,6 +132,15 @@ func CmdImage(args []string) int {
 		goldens, err := image.ListGolden(p.Images)
 		if err != nil {
 			return fatalf("golden catalog: %v", err)
+		}
+		if jsonOutput {
+			if imgs == nil {
+				imgs = []image.LocalImage{}
+			}
+			if goldens == nil {
+				goldens = []image.GoldenEntry{}
+			}
+			return failErr(writeJSONOut(map[string]any{"status": "completed", "data": map[string]any{"base": imgs, "golden": goldens}}))
 		}
 		if len(imgs) == 0 && len(goldens) == 0 {
 			fmt.Println("no images; run `pvm image fetch ubuntu:26.04`")
@@ -149,7 +165,7 @@ func CmdImage(args []string) int {
 	return fatalf("unknown image subcommand %q", args[0])
 }
 
-func cmdImageBuild(p *paths.Paths, spec string, keep bool, cpus, mem, disk int) int {
+func cmdImageBuild(p *paths.Paths, spec string, keep, fresh bool, cpus, mem, disk int) int {
 	tc, err := resolveQEMU(p)
 	if err != nil {
 		return fatalf("%v", err)
@@ -159,7 +175,7 @@ func cmdImageBuild(p *paths.Paths, spec string, keep bool, cpus, mem, disk int) 
 	entry, err := image.Bake(&image.BakeOptions{
 		Spec: spec, P: p, TC: tc, Accel: accel,
 		Out:    os.Stderr,
-		KeepVM: keep, BuildCPUs: cpus, BuildMem: mem, BuildDisk: disk,
+		KeepVM: keep, Fresh: fresh, BuildCPUs: cpus, BuildMem: mem, BuildDisk: disk,
 		Proxy: image.ProxyConfigFromEnv(),
 	})
 	if err != nil {
@@ -215,7 +231,14 @@ func CmdCreate(args []string) int {
 	gitName := fs.String("git-name", "", "git user.name in the guest")
 	share := fs.String("share", "private", "share mode: private | global | none")
 	smbiosSpoof := fs.Bool("smbios-spoof", false, "present commodity PC hardware in DMI instead of QEMU defaults")
-	if err := fs.Parse(args); err != nil {
+	pos, err := parseInterleaved(fs, args)
+	if err != nil {
+		return 2
+	}
+	if *name == "" && len(pos) == 1 {
+		*name = pos[0]
+	} else if len(pos) > 0 {
+		fs.Usage()
 		return 2
 	}
 	spec, err := resolveImageSpec(*imageSpec, *distro, *version)
@@ -225,7 +248,7 @@ func CmdCreate(args []string) int {
 	if *share != "private" && *share != "global" && *share != "none" {
 		return fatalf("--share must be private, global, or none")
 	}
-	if spec == "" || *name == "" {
+	if *name == "" {
 		fs.Usage()
 		return 2
 	}
@@ -242,6 +265,12 @@ func CmdCreate(args []string) int {
 	p, err := mustPaths()
 	if err != nil {
 		return fatalf("%v", err)
+	}
+	if spec == "" {
+		spec, err = resolveDefaultImage(p)
+		if err != nil {
+			return fatalf("%v", err)
+		}
 	}
 	supports9p := true
 	if runtime.GOOS == "windows" {
@@ -279,7 +308,7 @@ func CmdCreate(args []string) int {
 			}
 		}
 		fmt.Printf("no golden image for %s yet; baking one now (one-time)...\n", spec)
-		if rc := cmdImageBuild(p, spec, false, 4, 6144, 25); rc != 0 {
+		if rc := cmdImageBuild(p, spec, false, false, 4, 6144, 25); rc != 0 {
 			return fatalf("golden bake failed; retry, or use --base to create from the plain base image")
 		}
 	}
@@ -319,21 +348,31 @@ func CmdCreate(args []string) int {
 	if err := c.Post("/v1/vms", body, &out); err != nil {
 		return fatalf("create: %v", err)
 	}
-	fmt.Printf("[2/5] disk+seed: overlay + cloud-init (done in %.1fs)\n", time.Since(start).Seconds())
-	fmt.Printf("[3/5] cluster: ip=%s via gateway\n", out.Spec.IP)
-	fmt.Printf("created %s (user=%s ip=%s)\n", out.Spec.Name, out.Spec.User, out.Spec.IP)
+	pw := progressWriter()
+	fmt.Fprintf(pw, "[2/5] disk+seed: overlay + cloud-init (done in %.1fs)\n", time.Since(start).Seconds())
+	fmt.Fprintf(pw, "[3/5] cluster: ip=%s via gateway\n", out.Spec.IP)
+	fmt.Fprintf(pw, "created %s (user=%s ip=%s)\n", out.Spec.Name, out.Spec.User, out.Spec.IP)
 	if *noStart {
+		if jsonOutput {
+			return failErr(writeJSONOut(map[string]any{"status": "completed", "data": out}))
+		}
 		fmt.Println("not started (--no-start)")
 		return 0
 	}
-	fmt.Println("[4/5] boot: qemu started; waiting for provisioning and agent")
+	fmt.Fprintln(pw, "[4/5] boot: qemu started; waiting for provisioning and agent")
 	if *noWait {
+		if jsonOutput {
+			return failErr(writeJSONOut(map[string]any{"status": "accepted", "data": map[string]any{"vm": *name, "next_action": "pvm job ls --vm " + *name}}))
+		}
 		fmt.Printf("provisioning in background; watch: pvm logs %s --follow\n", *name)
 		return 0
 	}
-	fmt.Printf("[5/5] provision: following (ctrl-c to detach; vm keeps provisioning)\n")
+	fmt.Fprintln(pw, "[5/5] provision: following (ctrl-c to detach; vm keeps provisioning)")
 	if rc := followProvision(c, *name, provisionFollowTimeout); rc != 0 {
 		return rc
+	}
+	if jsonOutput {
+		return failErr(writeJSONOut(map[string]any{"status": "completed", "data": map[string]any{"vm": *name, "ready": true, "ip": out.Spec.IP}}))
 	}
 	fmt.Printf("ready in %.0fs; ssh: pvm ssh %s\n", time.Since(start).Seconds(), *name)
 	return 0
@@ -381,6 +420,7 @@ func promptUsername() string {
 }
 
 func CmdList(args []string) int {
+	args = scanJSONFlag(args)
 	p, err := mustPaths()
 	if err != nil {
 		return fatalf("%v", err)
@@ -392,6 +432,12 @@ func CmdList(args []string) int {
 	var infos []vmInfoView
 	if err := c.Get("/v1/vms", &infos); err != nil {
 		return fatalf("%v", err)
+	}
+	if jsonOutput {
+		if infos == nil {
+			infos = []vmInfoView{}
+		}
+		return failErr(writeJSONOut(map[string]any{"status": "completed", "data": infos}))
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tIMAGE\tROLE\tSTATUS\tIP\tCPU\tMEM\tUSER\tUPTIME")

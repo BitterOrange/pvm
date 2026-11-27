@@ -60,7 +60,7 @@
 - 修改并发或状态路径时，仍须完成相关包的定向测试和必要行为验证；仅在专项任务或用户明确要求时，对相关包运行 `go test -race`。
 - 功能改动必须验证真实行为：CLI 帮助和参数、伪终端 SSH、create/start/readiness、失败回滚、挂载、端口和出口链路。只做编译或 import 检查不算完成；不能验证的项目要在交付说明中列明。
 - 修改 QEMU 选择、门槛、探测、CPU 参数或快照绑定时，至少用一个项目构建和一个官方构建验证 create、start、readiness、快照创建与恢复，以及隧道断开时 VM 断网。
-- 修改文档示例、CLI 文本或嵌入文档时，同时检查源码、`README.md` 及其中文版 `README.zh-CN.md`（两者内容保持同步）、`SKILL.md`、`SECURITY.md` 和构建后 `pvm skill`/`pvm security` 的输出，避免文档与实现漂移。
+- 修改文档示例、CLI 文本或嵌入文档时，同时检查源码、`README.md` 及其中文版 `README.zh-CN.md`（两者内容保持同步）、`SKILL.md`、`SECURITY.md` 及其中文版 `SECURITY.zh-CN.md`（同步；只有英文版 embed） 和构建后 `pvm skill`/`pvm security` 的输出，避免文档与实现漂移。
 
 ## Hard Constraints
 

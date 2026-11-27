@@ -697,6 +697,7 @@ func createUpload(p *paths.Paths, store *workspace.Store, info *vmInfoView, ws *
 }
 
 func cmdWorkspaceList(args []string) int {
+	args = scanJSONFlag(args)
 	if len(args) != 0 {
 		return fatalf("usage: pvm workspace ls")
 	}
@@ -707,6 +708,12 @@ func cmdWorkspaceList(args []string) int {
 	list, err := workspace.NewStore(p).List()
 	if err != nil {
 		return fatalf("%v", err)
+	}
+	if jsonOutput {
+		if list == nil {
+			list = []*workspace.Workspace{}
+		}
+		return failErr(writeJSONOut(map[string]any{"status": "completed", "data": list}))
 	}
 	if len(list) == 0 {
 		fmt.Println("no workspaces; create one with `pvm workspace create <id> <vm> --mode mount|sync|copy`")
@@ -817,6 +824,7 @@ func loadSync(p *paths.Paths, store *workspace.Store, id, cmd string) (*syncStat
 }
 
 func cmdWorkspaceStatus(args []string) int {
+	args = scanJSONFlag(args)
 	if len(args) != 1 {
 		return fatalf("usage: pvm workspace status <id>")
 	}
@@ -829,6 +837,9 @@ func cmdWorkspaceStatus(args []string) int {
 		return rc
 	}
 	sum := threeway.Status(s.base, s.host, s.guest)
+	if jsonOutput {
+		return failErr(writeJSONOut(map[string]any{"status": "completed", "data": map[string]any{"workspace": s.ws, "summary": sum}}))
+	}
 	writeStatus(os.Stdout, s.ws, sum)
 	return 0
 }

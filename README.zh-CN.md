@@ -2,110 +2,74 @@
 
 [English](README.md) | 简体中文
 
-单个二进制管理的个人 QEMU 开发虚拟机：一条命令创建隔离的 Linux 开发机，并让它的全部流量经由你自己的 VPS 出口。
+单个二进制的个人 QEMU 开发虚拟机：一条命令创建隔离的 Linux 开发机，并让它的全部流量经由你自己的 VPS 出网。
 
 ## 亮点
 
-- **一条命令，一台开箱即用的开发机。** 预装 Docker、常用工具、Firefox 和桌面。镜像只需烘焙一次，之后新建虚拟机约 30 秒就绪。见[快速开始](#快速开始)。
-- **流量全走你自己的出口，出口断了就断网。** 经 WireGuard 走你的 VPS，或用无需部署的 Cloudflare WARP。隧道一断，虚拟机直接断网，绝不漏出宿主机 IP。见[失败即断网的出口路由](#失败即断网的出口路由)。
-- **按域名或网段分流。** 让部分域名直连或走另一个出口，规则即时生效，无需重启。
-- **虚拟机里的程序变成宿主机原生窗口。** `pvm app dev1 -- gedit` 或一个网页在你的桌面上开成独立窗口，Cookie、指纹和出口都留在虚拟机里，还能直接用宿主机输入法打字。见[虚拟机应用作为宿主机窗口](#虚拟机应用作为宿主机窗口)。
-- **浏览器标签页里的完整桌面。** `pvm desktop` 打开虚拟机自己的桌面，和 SSH 登录的是同一台机器。见[浏览器桌面](#浏览器桌面)。
-- **项目文件夹直接在虚拟机里用。** 挂载一个目录、保持两份同步副本，或上传一次再把结果下载回来。在项目目录里运行 `pvm ssh`，就会进入对应虚拟机里的同一目录，虚拟机没启动时先问你要不要启动。见[工作区](#工作区)。
-- **秒级快照**（原生 Windows 除外：QEMU 无法迁移 WHPX 虚拟机）**和克隆**、回环端口映射，以及只读的 `pvm audit` 路由和 DNS 体检。
-- **Windows 免管理员安装。** 一个安装包装好 pvm、PVM Desktop 图形应用、QEMU 和 Xpra 客户端。见[Windows 安装包](#windows-安装包)和 [PVM Desktop](#pvm-desktop)。
-
-## 路线图
-
-已完成：
-
-- [x] 按用户安装的 Windows 安装包；工作区（`mount`、`sync`、`copy`）；golden 镜像自带 Firefox 和 sshfs（v1.1.6-1.1.7）
-- [x] `pvm app`（虚拟机里的程序和网页作为宿主机窗口）、`pvm.stream` 通道和更快的 `pvm desktop`、原生 Windows 上的 UDP 出口、安装包自带 Xpra 客户端（v1.2.0）
-- [x] 默认使用当前工作区的虚拟机；`pvm app` 支持宿主机窗口边框、声音、剪贴板文件、emoji 和各主要文字的字体；CI 跑 Windows 单元测试（v1.2.1-1.2.2）
-- [x] 原生 Windows 上的 PVM Desktop、保存的默认虚拟机、应用目录与 `pvm app install`；合并上游（v1.3.0-1.3.1）
-- [x] `pvm resize` 和 PVM Desktop 可调 vCPU 与内存、在 PVM Desktop 里关闭 daemon、在虚拟机内检测已安装的应用、应用目录加入 Firefox（v1.3.2-1.3.3）
-- [x] Chromium 应用的渲染进程 CPU 上限；输入法文字经 ibus 输入，Windows 上候选框跟随文本光标；声音更省 CPU、静音不发送，麦克风随耳机插拔切换（v1.3.4）
-- [x] 密钥环改为设置项，`off` 或 `host`（加密存放、由宿主机解锁）；按虚拟机设置窗口缩放；应用设置对已打开的窗口立即生效；Electron 应用点击后不再出现焦点框（v1.3.5）
-- [x] PVM Desktop：虚拟机未启动时点终端、应用、文件，会询问是否先启动，就绪后自动打开；应用设置分组显示，不用滚动就能看到全部（v1.3.6）
-- [x] `pvm qemu`：按摘要固定的 pvm-qemu 构建或本平台官方 QEMU，没有 QEMU 也能运行的 daemon，PVM Desktop 的 QEMU 页面；M1 Mac 上网关可以启动（v1.4.0）
-
-计划中：
-
-- [ ] 正式名称：Proxied Virtual Machine (PVM)，待与上游确认
-- [ ] 安装包不再自带 QEMU 的第二步：安装包去掉 QEMU，`install.sh` 改为运行 `pvm qemu install`（v1.4.1；[计划](docs/design/qemu.md)）
-- [ ] WHPX：虚拟机内可用 AVX，并按虚拟机选择 QEMU（pvm-qemu 构建或本平台的官方版）
-- [ ] `pvm app`：macOS 和 Linux 上宿主机到虚拟机的剪贴板、WSL2，以及不用 ibus 的程序里的输入法输入
-- [ ] `pvm desktop` 像 `pvm app` 一样作为宿主机窗口打开，并在虚拟机文件管理器里打开工作区目录
-- [ ] PVM Desktop：在 Windows 上测试安装包、虚拟机未启动时保留工作区表单、资源管理器右键菜单"创建 PVM 工作区"、托盘图标，以及快照、端口映射和挂载的界面
-- [ ] PVM Desktop 自行更新：下载、校验并运行与其安装方式对应的安装包，并可运行 `pvm upgrade` 更新本机的 pvm
-- [ ] `pvm exit-agent install|uninstall`，注册为 systemd 服务
-- [ ] M1 Mac：网关在 HVF 允许的 15 条 PCI 总线内启动
-- [ ] WHPX 下不支持 RAM 快照：直接拒绝并说明原因
-- [ ] Windows CI：其余包的测试，以及打 tag 时对安装包做冒烟测试
-
-候选：
-
-- [ ] `pvm ssh-config`，供 VS Code Remote-SSH、rsync 等工具使用
-- [ ] `pvm exit test` 增加出网探测
-- [ ] 默认镜像
-- [ ] 端口映射改走 `pvm.stream`，不再经过 gateway 虚拟机
-- [ ] 出口有序列表与故障切换，保持 kill-switch fail-closed
-- [ ] 修复 gateway 规则漂移误报
-- [ ] 在 self-hosted runner 上跑 WHPX 端到端测试
-
-详见 [docs/roadmap.md](docs/roadmap.md)。
+- **一条命令得到开发机。** 预装 Docker、常用工具、Firefox 和桌面。首次烘焙镜像之后，新虚拟机约 30 秒就绪。
+- **流量只从你的出口走。** 虚拟机可以经 WireGuard 走你的 VPS、Cloudflare WARP，或导入的 Clash/Mihomo/Surge 节点。隧道断开时虚拟机直接断网，不会改走宿主机的网络。
+- **分流。** 指定的域名或网段可以直连或走另一个出口，规则即时生效。
+- **可以自己检查。** `pvm check dev1` 实测虚拟机这条路径的真实出口 IP；`pvm route require-check` 让虚拟机在检查通过前保持断网。
+- **虚拟机里的程序作为宿主机窗口。** `pvm app dev1 -- gedit` 把一个程序作为独立窗口显示在桌面上；它的 cookie、指纹和流量都留在虚拟机里。
+- **把项目目录带进虚拟机。** 挂载目录、两边各保留一份同步，或上传一次再下载结果。
+- **适合脚本和 agent。** `--json` 输出、`pvm capabilities`、`pvm job`，以及只读的 `pvm dashboard`。
+- **Windows 无需管理员权限。** 一个安装包装好 pvm、PVM Desktop 应用、QEMU 和 Xpra 客户端。
 
 ## 安装
 
-pvm 支持 arm64 的 macOS、amd64 的 Linux，以及 amd64 的 Windows。
+pvm 支持 arm64 的 macOS、amd64 的 Linux 和 amd64 的 Windows。
 
 ### Windows
 
-1. 从 [Releases](../../releases) 下载 `pvm_windows_amd64_setup.exe` 或 `pvm_windows_amd64_setup.msi`。可先校验：`gh attestation verify pvm_windows_amd64_setup.exe --repo BitterOrange/pvm`。
-2. 运行它，不需要管理员权限。
-3. 打开新的终端让 `PATH` 变更生效，运行 `pvm doctor` 检查加速和后端。也可以从开始菜单打开 **PVM Desktop**，见 [PVM Desktop](#pvm-desktop)。
+1. 从 [Releases](../../releases) 下载 `pvm_windows_amd64_setup.exe` 或 `pvm_windows_amd64_setup.msi`。如需先校验：`gh attestation verify pvm_windows_amd64_setup.exe --repo BitterOrange/pvm`。
+2. 运行安装包，不需要管理员权限。
+3. 打开新的终端运行 `pvm doctor`，或从开始菜单打开 **PVM Desktop**。
 
-两种安装包都会把 `pvm.exe` 和 `pvm-desktop.exe` 装到 `%LOCALAPPDATA%\pvm` 并把该目录加入用户 `PATH`，在开始菜单添加"PVM Desktop"快捷方式，把 Xpra 客户端装到 `%LOCALAPPDATA%\pvm\xpra`，把固定版本的 [pvm-qemu 构建](#qemu)放到 `%USERPROFILE%\.pvm\runtime\qemu` 下（设置了 `PVM_HOME` 时放在它下面），pvm 的 daemon 首次启动时会把它收编到 `runtime\qemu\builds`。每台机器只用一种安装包。`pvm upgrade` 只更新 `pvm.exe`，既不改动 QEMU，也不更新 `pvm-desktop.exe`；要更新图形应用请运行新版安装包。卸载时会保留 `runtime\qemu\builds` 下的 QEMU 构建和你的虚拟机。
+两种安装包都会把 `pvm.exe` 和 `pvm-desktop.exe` 放到 `%LOCALAPPDATA%\pvm`，把该目录加入用户 `PATH`，添加开始菜单快捷方式，安装 Xpra 客户端，并把固定的 [pvm-qemu 构建](#qemu) 放进 pvm 数据目录（`%USERPROFILE%\.pvm`，或 `PVM_HOME`）。
 
-- `.exe` 安装包的最后一页提供"Open PVM Desktop"选项，默认不勾选。MSI 没有这一页。
-- 正在运行的 pvm、虚拟机或 PVM Desktop 占用的文件无法替换。交互运行时会提示关闭 PVM Desktop 并停止 daemon（同时停止正在运行的虚拟机）；静默运行（`/S`、`msiexec /qn`）则直接拒绝，请先关闭 PVM Desktop 并执行 `pvm daemon stop`。
-- 请一直使用最初那种安装包：`.exe` 不会覆盖 MSI 安装，MSI 也不会覆盖 `.exe` 安装。要换用另一种，先在"设置 > 应用"中卸载，虚拟机会保留。
-- MSI 静默安装：`msiexec /i pvm_windows_amd64_setup.msi /qn`。传入 `PVMHOME=D:\pvm-home` 可指定数据位置，升级和卸载会沿用它。
-- 从"设置 > 应用"卸载会删除 pvm、PVM Desktop 及其开始菜单快捷方式和"登录时打开"的启动项、运行时、Xpra 客户端和 `PATH` 条目。`~/.pvm` 下的虚拟机磁盘、密钥和配置会保留。
+- 一台机器只用一种安装包：两者都会拒绝覆盖另一种。要换用另一种，先在“设置 > 应用”里卸载。
+- `pvm upgrade` 只更新 `pvm.exe`。更新 PVM Desktop 需要运行新的安装包。
+- 卸载会保留 `~/.pvm` 下的虚拟机、密钥、配置和 QEMU 构建。
 
 <details>
-<summary>Windows 安装包的已知限制</summary>
+<summary>关于 Windows 安装包的更多说明</summary>
 
-- 安装、以及从"设置 > 应用"卸载，都是在 pvm 停止的状态下测试的。提示停止正在运行的 daemon 的流程还没有端到端测试过。如果提示没有出现，或者安装程序仍提示 pvm 正在运行，请取消，执行 `pvm daemon stop`，再重新运行安装程序。
-- 安装程序停止 daemon 时会等待正在运行的虚拟机关闭，最长约三分钟，期间不显示进度。
-- 没有 daemon 而遗留运行的虚拟机，安装程序无法停止。它会列出这些虚拟机并拒绝继续；请先关闭它们，再重新运行安装程序。
-- 杀毒软件会短暂锁定刚解压的文件。安装程序对每次文件移动最多重试 10 秒；锁定持续更久时会报错停止并保留旧版本。请重新运行安装程序。
-- 执行 `pvm upgrade` 后，"设置 > 应用"中显示的仍是安装包当初写入的版本号，PVM Desktop 也停留在那个版本。
-- 安装包中与 PVM Desktop 有关的部分（快捷方式、关闭正在运行的应用、卸载时清理它的条目）已能构建，但还没有在 Windows 上运行过。
+- 正在使用的文件无法替换。交互式安装会提示关闭 PVM Desktop 并停止 daemon（运行中的虚拟机也会停止）；静默安装（`/S`、`msiexec /qn`）会直接拒绝，请先关闭 PVM Desktop 并运行 `pvm daemon stop`。
+- 静默安装 MSI：`msiexec /i pvm_windows_amd64_setup.msi /qn`。传入 `PVMHOME=D:\pvm-home` 可指定数据目录，升级和卸载会沿用它。
+- `.exe` 安装包的最后一页提供“打开 PVM Desktop”；MSI 没有这一页。
+- 卸载会移除 pvm、PVM Desktop 及其快捷方式和“登录时打开”设置、Xpra 客户端和 `PATH` 条目。
+
+已知限制：
+
+- 提示停止运行中 daemon 的流程还没有完整测试过。如果没有出现提示，取消安装，运行 `pvm daemon stop` 后重试。
+- 安装程序停止 daemon 时最多等待约三分钟让虚拟机关机，期间不显示进度。
+- 没有 daemon 却仍在运行的虚拟机，安装程序无法停止。它会列出这些虚拟机并拒绝继续，请先关掉它们。
+- 杀毒软件可能短暂锁定新解压的文件。安装程序会重试 10 秒，仍失败就停止并保留旧版本。
+- `pvm upgrade` 之后，“设置 > 应用”里显示的仍是安装包的版本。
 
 </details>
 
-Windows 有两种后端，通过 `PVM_BACKEND` 或 `~/.pvm/config.yaml` 中的 `backend` 选择：
+Windows 有两种后端，用 `PVM_BACKEND` 或 `~/.pvm/config.yaml` 中的 `backend` 选择：
 
-- `native`：Windows 版 daemon 直接运行 Windows QEMU，启用 Windows Hypervisor Platform 时使用 WHPX。所有 Windows 版 QEMU 都没有 virtio-9p（pvm-qemu 构建和 MSYS2 的都没有），因此 `/share` 关闭；宿主机目录请用[工作区](#工作区)。
-- `wsl`：命令转发给 WSL2 中的 `pvm`，支持完整的 `/share`、额外挂载，以及（可用时的）KVM。
-- `auto`（默认）：原生 daemon 正在运行或已设置原生 QEMU 构建时用原生模式，否则在 WSL2 装有 pvm 时用 WSL2，再否则用原生模式。`auto` 选中 WSL2 时如果要设置原生 QEMU，运行 `PVM_BACKEND=native pvm qemu install`，或使用 PVM Desktop 的 QEMU 页面。
+- `native`：Windows 版 QEMU 加 WHPX。Windows 版 QEMU 都没有 virtio-9p，所以 `/share` 不可用；宿主机目录请用[工作区](#工作区)。
+- `wsl`：命令交给 WSL2 里的 `pvm`，支持 `/share`、额外挂载和 KVM。
+- `auto`（默认）：有原生 daemon 在运行或已配置原生 QEMU 时用 native，否则 WSL2 里装了 pvm 就用 wsl，再否则用 native。
 
-加速、DNS 和 WSL2 嵌套虚拟化的设置见 [SKILL.md](SKILL.md)。
+加速、DNS 和 WSL2 的设置见 [SKILL.md](SKILL.md)。
 
 ### macOS 和 Linux
 
-先安装 GitHub CLI（`gh`）和 Python 3，然后执行：
+先安装 GitHub CLI（`gh`）和 Python 3，然后：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/BitterOrange/pvm/master/scripts/install.sh | sh
 ```
 
-脚本把 `pvm` 装到 `~/.local/bin`（可用 `INSTALL_DIR` 修改），并安装自带的 QEMU 运行时（设置 `PVM_SKIP_QEMU=1` 则改用系统 QEMU）。替换任何文件之前，它会校验发布包的 checksum 和 GitHub 构建证明（attestation），并保留旧的二进制和运行时。该脚本在 Windows 的 Git Bash 中也能用，但 Windows 上推荐使用安装包。
+脚本把 `pvm` 安装到 `~/.local/bin`（可用 `INSTALL_DIR` 修改），并安装固定的 QEMU 构建（`PVM_SKIP_QEMU=1` 跳过）。替换任何文件之前，它会校验校验和以及 GitHub 构建证明，并保留上一个版本。
 
 ### 快速开始
 
-daemon 会按需自动启动。首次 `create` 会下载并烘焙镜像，只需一次，约十分钟。
+daemon 按需启动。第一次 `create` 会下载并烘焙镜像，只需一次，大约十分钟。
 
 ```bash
 pvm create --image ubuntu:26.04 --name dev1 --user dev
@@ -116,178 +80,175 @@ pvm exit add-warp my-warp
 pvm route dev1 --via my-warp
 ```
 
-`pvm list` 显示每台虚拟机的状态：`stopped`、带当前阶段的 `starting`、`ready` 或 `failed`；失败的虚拟机会在表格下方给出提示。
-
-支持 9p 的宿主机上，每台虚拟机都有一个私有的宿主机目录挂在 `/share`（`~/.pvm/vms/<name>/share`）；`pvm mount` 可以添加更多挂载，挂载配置见 [SKILL.md](SKILL.md)。
+`pvm list` 把每台虚拟机显示为 `stopped`、`starting`（附当前阶段）、`ready` 或 `failed`。`pvm image default ubuntu:26.04` 之后，创建时可以省略 `--image`。
 
 ## 功能
 
 ### 失败即断网的出口路由
 
-注册一个 VPS 出口，让整台虚拟机经由它上网。TCP、UDP 和 ICMP 经 WireGuard（UDP 或 TCP 承载）转发；隧道断开时流量直接丢弃，不会回落到宿主机的网络。
+注册一个出口，让整台虚拟机经它出网。TCP、UDP 和 ICMP 都经 WireGuard（UDP 或 TCP 传输）。隧道断开时流量被丢弃，绝不改走宿主机。
 
 ```bash
-pvm exit add my-exit --server vps.example.com:18443 --token YOUR_TOKEN
+pvm exit add my-exit --server vps.example.com:18443 --token YOUR_TOKEN   # 自己的 VPS
+pvm exit add-warp my-warp                                                # Cloudflare WARP，无需部署
+pvm exit import my-sub --file clash.yaml --select NODE                   # Clash/Mihomo/Surge 节点
 pvm route dev1 --via my-exit
-pvm ssh dev1 'curl -s ipinfo.io'
-pvm route dev1 --via direct
-```
-
-也可以使用 Cloudflare WARP，无需部署 VPS，也不用在虚拟机里安装任何东西：
-
-```bash
-pvm exit add-warp my-warp
-pvm route dev1 --via my-warp
-```
-
-让所有未显式设置路由的虚拟机都走某个出口，并按域名或网段添加分流规则：
-
-```bash
-pvm route default --via my-exit
-pvm route add direct --domain-suffix example.com
-pvm route add proxy --domain-suffix example.com --via my-exit
+pvm route default --via my-exit                       # 所有没有单独设置路由的虚拟机
+pvm route add direct --domain-suffix example.com      # 分流
 pvm route ls
 ```
 
-只有显式的 direct 和 internal 规则可以绕过所选出口。自己部署出口见[在 VPS 上部署出口](#在-vps-上部署出口)。
+只有显式的 `direct` 和 `internal` 规则会绕过出口。直连的虚拟机默认访问不到宿主机局域网，除非有规则放行。自己部署出口见[在 VPS 上部署出口](#在-vps-上部署出口)。
 
-### 虚拟机应用作为宿主机窗口
+### 检查与自动化
 
-`pvm app` 通过 [Xpra](https://xpra.org) 把虚拟机里的单个程序或网页显示为宿主机窗口。宿主机需要 Xpra 6.5 客户端，Windows 安装包已自带；虚拟机里第一次运行 app 时，会从 xpra.org 的仓库安装 Xpra 服务端。
+- `pvm check dev1` 在虚拟机和网关两条路径上采样公网出口 IP，并用网关的计数器核对被拦截的探测。
+- `pvm route require-check dev1` 让虚拟机在检查通过前保持断网，之后靠 daemon 续期的 90 秒租约维持联网；daemon 不在了，虚拟机就断网。`pvm exit set my-exit --ip-mode static` 会在出口的 IP 或地区变化时切断它。
+- `pvm route pause` 和 `resume` 切断和恢复虚拟机的外部流量。
+- 只读命令支持 `--json`；`pvm capabilities` 离线给出接口约定；`pvm job` 跟踪耗时操作。
+- `pvm dashboard` 在本机回环地址上提供只读状态页；`pvm diag` 导出脱敏的诊断压缩包。
+- `pvm audit dev1 --privacy`、`pvm doctor` 和 `pvm route explain dev1 example.com` 只检查本地配置，不做网络探测。
+
+### 应用作为宿主机窗口
+
+`pvm app` 通过 [Xpra](https://xpra.org) 把虚拟机里的单个程序或网页显示为宿主机窗口。宿主机需要 Xpra 6.5 客户端，Windows 安装包已自带。
 
 ```bash
 pvm app dev1 -- gedit
 pvm app dev1 https://mail.example.com --kiosk
-pvm app ls
 pvm app config dev1 --clipboard both --drop on --audio both
-pvm app attach dev1
-pvm app stop dev1 --all
-pvm app catalog
 pvm app install dev1 claude-code codex claude-desktop
+pvm app ls
+pvm app stop dev1 --all
 ```
 
-剪贴板和拖放默认关闭，需按虚拟机单独开启。使用 `--clipboard to-guest` 或 `both` 时，宿主机内容只在该虚拟机的窗口切到前台、或窗口在前台时复制，才会进入虚拟机；被密码管理器标记为排除的内容永远不会发送。文本、图片，以及在 Windows 宿主机上的文件和文件夹，都可以双向复制粘贴。用宿主机输入法（比如微软拼音）输入的中文，或表情面板里的 emoji，也能正常输入到应用里；在 Windows 宿主机上，输入法的候选框会出现在应用的文本光标处。声音从宿主机扬声器播放；`--audio both` 还会把宿主机的麦克风借给虚拟机。虚拟机没有播放声音时不发送音频，可以节省虚拟机的 CPU；`--audio-silence send` 会照常发送。Chromium 和 Electron 应用（比如 Claude Desktop）的渲染进程只用 2 个 vCPU，在虚拟机里比用满全部 vCPU 绘制得更快；`--render-cpus N` 修改这个数，对之后启动的应用生效，`0` 表示不限制。`--scale 1.25`、`1.5` 或 `2` 让虚拟机用更少的像素绘制窗口，再由宿主机放大显示：绘制更快，文字大小不变，但会略显模糊。`pvm app config` 会让已打开的窗口重新连接，所以这些设置改了立即生效。`--keyring host` 用保存在宿主机上的密码加密虚拟机的 login 密钥环，并在应用启动前解锁，Claude Desktop 等应用因此保持登录；默认的 `off` 把密钥环交给虚拟机自己管理。详见 [docs/design/app.md](docs/design/app.md)。
+- **剪贴板和拖放**默认关闭，需按虚拟机开启。宿主机内容只在该虚拟机的窗口位于前台时进入虚拟机，被密码管理器标记为排除的内容永远不会发送。
+- **输入法**：宿主机输入法（比如微软拼音或表情面板）输入的文字能到达应用。
+- **声音**在宿主机播放；`--audio both` 还会把麦克风借给虚拟机。
+- **速度**：`--render-cpus N` 限制 Chromium 和 Electron 应用的渲染进程（默认 2 个），`--scale 1.25|1.5|2` 让虚拟机少画像素。
+- **密钥环**：`--keyring host` 用保存在宿主机上的密码加密虚拟机的 login 密钥环，Claude Desktop 等应用因此保持登录。默认的 `off` 交给虚拟机自己管理。
+- **应用目录**：`pvm app catalog` 列出 Claude Code、Codex CLI、Claude Desktop 和 Firefox。`pvm app install` 在虚拟机里运行内置脚本，下载经虚拟机的出口进行。
 
-`pvm app catalog` 列出 pvm 可以代为安装的应用：Claude Code、Codex CLI、Claude Desktop 和 Firefox，均为厂商官方的 Linux 版本。`pvm app install [<vm>] <id>...` 在虚拟机内以 root 运行该应用的内置安装脚本；下载只发生在虚拟机里，经它的出口出网，不经过宿主机。`pvm app ls` 还会显示每台虚拟机里已有的目录应用，包括随镜像预装或手动安装的。
+用 `pvm app config` 修改的设置对已打开的窗口立即生效。详见 [docs/design/app.md](docs/design/app.md)。
 
 ### 浏览器桌面
 
-`pvm desktop dev1` 通过 TigerVNC 和 noVNC 在回环地址上提供虚拟机自己的 XFCE 桌面，分辨率随浏览器窗口调整。新虚拟机通过 `pvm.stream` 传输；没有该端口的虚拟机继续使用原有 gateway 映射和中继，并在重启后自动迁移。`--public` 会监听 `0.0.0.0`，但仍需 VNC 认证。
+`pvm desktop dev1` 通过 noVNC 在浏览器标签页里打开虚拟机的 XFCE 桌面，地址只在本机回环上。`--public` 监听所有网卡，仍需要 VNC 密码。
 
 ### 工作区
 
-工作区把一个宿主机目录绑定到一台虚拟机的 `/workspace/<id>`。创建时选择模式：
+工作区把一个宿主机目录绑定到一台虚拟机的 `/workspace/<id>`：
 
-- `mount`：只有一份共享副本。Linux、macOS 和 WSL2 使用 9p；原生 Windows 后端使用反向 sshfs，走已有的 SSH 连接。宿主机上的修改不会在虚拟机中触发 inotify 事件，监听文件的工具需要改用轮询（例如 `CHOKIDAR_USEPOLLING=1`）。
-- `sync`：两端各有一份完整副本。用 `push` 和 `pull` 搬运改动，发现冲突时会停止，直到你传入 `--prefer host`、`--prefer vm` 或 `--keep-both`。
-- `copy`：上传一次，在虚拟机中工作，结束后用 `clone` 下载结果。
+- `mount`：共享一份（9p，原生 Windows 上为反向 sshfs）。文件监听需要轮询，比如 `CHOKIDAR_USEPOLLING=1`。
+- `sync`：两边各一份；`push` 和 `pull` 搬运改动，遇到冲突会停下。
+- `copy`：上传一次，之后用 `clone` 下载结果。
 
 ```bash
 cd ~/src/web
 pvm workspace create web dev1 --mode sync
 pvm ssh 'npm install && npm test'
 pvm workspace pull web
-pvm workspace clone web ~/src/web-result
-pvm workspace rm web
 ```
 
-在工作区目录里，`pvm ssh`、`pvm exec`、`pvm app`、`pvm map` 等命令可以省略虚拟机名，使用该工作区的虚拟机；`pvm ssh` 和用 `pvm app` 启动的程序会从对应目录开始。不在工作区里时，使用 `pvm default-vm dev1` 设置的虚拟机（保存为 `~/.pvm/config.yaml` 中的 `default_vm`；`pvm default-vm --clear` 取消设置），没有设置且只有一台虚拟机时就用它。在终端里，虚拟机没启动时 pvm 会先问你要不要启动。
+上传会跳过 `.gitignore` 匹配的路径和 `node_modules`，`.pvmignore` 可追加规则。pvm 拒绝共享主目录、文件系统根目录、它自己的数据目录，以及含 `.ssh`、`.aws`、`.env` 等凭据的目录（`pvm mount --allow-sensitive` 可覆盖）。`pvm workspace rm` 从不删除宿主机文件。详见 [docs/design/workspace.md](docs/design/workspace.md)。
 
-上传会跳过 `.gitignore` 匹配的路径和 `node_modules`；`.pvmignore` 文件可以追加规则或重新包含路径。pvm 拒绝上传或挂载主目录、文件系统根目录、它自己的数据目录，以及包含 `.ssh`、`.aws` 等凭据的目录树；`pvm workspace rm` 从不删除宿主机文件。详见 [docs/design/workspace.md](docs/design/workspace.md)。
-
-### Windows 安装包
-
-每个发布都附带 `pvm_windows_amd64_setup.exe` 和 `pvm_windows_amd64_setup.msi`：按用户安装、不需要管理员权限，一步装好 pvm、PVM Desktop、固定版本的 pvm-qemu 构建和 `pvm app` 所需的 Xpra 客户端。替换文件前会检测正在运行的 pvm，卸载时保留你的虚拟机。见[在 Windows 上安装](#windows)。
+**可以省略虚拟机名。** 在工作区目录里，`pvm ssh`、`pvm exec`、`pvm app` 和 `pvm map` 使用该工作区的虚拟机，并从对应目录开始。在别处则使用 `pvm default-vm dev1` 设置的虚拟机，没有设置就用唯一的那台。在终端里，虚拟机没启动时 pvm 会先问你。
 
 ### PVM Desktop
 
-PVM Desktop 是一个图形窗口，覆盖最常用的操作，用于采用原生（WHPX）后端的 Windows。从开始菜单打开，或运行 `pvm-desktop.exe`。
+常用操作的图形窗口，用于使用原生后端的 Windows。从开始菜单打开。
 
-- **虚拟机。** 查看每台虚拟机的状态和启动阶段；启动、停止、删除；调整 vCPU、内存和磁盘；打开终端、应用或文件管理器；安装目录应用；设置默认虚拟机。
-- **创建。** 用表单创建虚拟机，包括规格、出口、剪贴板、拖放和音频设置，以及要预装的目录应用。出口在虚拟机首次启动之前就已设置。
-- **出口。** 添加、测试和删除出口，设置默认出口，修改某台虚拟机的出口。
-- **工作区。** 创建和删除工作区，推送和拉取，并在对应的虚拟机目录里打开宿主机文件夹、终端、应用或文件管理器。
-- **设置。** 默认虚拟机、登录时启动 daemon、登录时打开应用，以及窗口的语言：英文或简体中文。
+- **虚拟机**：状态和启动阶段；启动、停止、删除、调整大小；打开终端、应用或文件管理器；安装目录应用。
+- **创建**：新建虚拟机，设置大小、出口、应用设置和预装的应用。
+- **出口**、**工作区**、**QEMU** 和**设置**（默认虚拟机、登录时启动、英文或简体中文界面）。
 
-图形应用不做 CLI 做不到的事：每个改动都是运行一次 `pvm.exe`，输出显示在窗口里。说明：
-
-- 需要 Microsoft Edge WebView2 Runtime，Windows 10 和 11 通常已自带。缺少时应用会提示并打开微软的下载页面，不会替你安装任何东西。
-- 使用 WSL2 后端时，应用只显示一页说明；请在那里使用 CLI。
-- `pvm upgrade` 不会更新图形应用。应用和 daemon 报告的版本不一致时，设置页会提示；请运行新版安装包。
-- 它是新功能，还没有在 Windows 上做过端到端测试。目前没有托盘图标，也没有快照、端口映射、挂载和日志的界面。见 [docs/design/gui.md](docs/design/gui.md)。
+每个改动都通过运行 `pvm.exe` 完成，所以应用做不了命令行做不了的事。它需要 Microsoft Edge WebView2 Runtime，Windows 10 和 11 通常自带。从安装包安装后的完整流程还没有测试过。详见 [docs/design/gui.md](docs/design/gui.md)。
 
 ### 架构
 
-宿主机上的 `pvm` 二进制同时提供 CLI 和 daemon，也可以在 VPS 上作为出口 agent 运行。另有一个从 `cmd/agent` 构建的独立 guest 二进制，只包含 guest agent、当前虚拟机的端口映射和 guest skill。daemon 负责虚拟机和集群的生命周期；受管的 gateway 虚拟机提供 DNS、路由、WireGuard 设备和 fail-closed 断网保护（kill switch）。WARP 的注册和凭据都在宿主机上管理，不需要 `warp-cli`、`wgcf` 或额外的配置文件。
+宿主机上的 `pvm` 二进制既是命令行也是 daemon，还可以在 VPS 上作为出口 agent 运行。虚拟机里运行单独的小型 guest agent。由 pvm 管理的网关虚拟机负责 DNS、路由、WireGuard 隧道和 kill switch。
 
 ```text
-控制面: pvm CLI -> pvm daemon -> gateway 虚拟机和开发虚拟机
-数据面: 开发虚拟机 -> gateway 虚拟机 -> WireGuard 隧道 -> VPS 上的出口 agent 或 Cloudflare WARP -> 互联网
+控制：pvm CLI -> pvm daemon -> 网关虚拟机和开发虚拟机
+数据：开发虚拟机 -> 网关虚拟机 -> WireGuard 隧道 -> VPS 出口、Cloudflare WARP 或 Mihomo 节点 -> 互联网
 ```
 
 ## QEMU
 
-pvm 只按绝对路径运行你用 `pvm qemu` 选定的 QEMU 构建，从不在 PATH 中查找，也不会自行换用其他构建。多个构建并存在 `~/.pvm/runtime/qemu/builds` 下，其中一个是默认构建。QEMU 有两种来源：
+pvm 只按绝对路径运行你用 `pvm qemu` 选定的构建，从不在 `PATH` 里查找，也不会自行换用其他构建。来源有两种：
 
-- **项目构建**：由 [pvm-qemu](https://github.com/BitterOrange/pvm-qemu) 项目从签名的上游源码构建，每个发布都附带完整源码。只有归档的 SHA-256 与 pvm 发布中固定的值一致时，pvm 才会安装它；不需要管理员权限或 `gh`。这些不是 QEMU 官方发行版，pvm-qemu 与 QEMU 项目没有关联。
-- **官方构建**：由你自己通过平台渠道安装的 QEMU：macOS 用 Homebrew（`brew install qemu`），Linux 用发行版软件包（8.2 或更新版本，例如 `sudo apt install qemu-system-x86 qemu-utils`），Windows 用 qemu.org 链接的 MSYS2 UCRT64（`pacman -S mingw-w64-ucrt-x86_64-qemu`）。
+- **项目构建**：由 [pvm-qemu](https://github.com/BitterOrange/pvm-qemu) 从 QEMU 签名源码构建，每个发布都附完整源码。只有 SHA-256 与 pvm 发布中固定的摘要一致，pvm 才会安装。它不是 QEMU 官方发布。
+- **官方构建**：本平台自己的 QEMU：macOS 的 Homebrew、Linux 发行版的软件包（8.2 或更新），或 Windows 上的 MSYS2 UCRT64。
 
 ```bash
-pvm qemu                                # 构建列表、默认构建、推荐的固定版本和残留目录
-pvm qemu install -y                     # 安装推荐的项目构建
-pvm qemu install --file pvm-qemu-11.1.3-pvm1-linux-amd64.tar.gz -y   # 离线安装已下载的归档
-pvm qemu use official                   # Homebrew、发行版或 MSYS2 的 QEMU
-pvm qemu check --default                # 退出码 0 正常，3 尚未设置，1 检查失败
-pvm qemu rm 11.1.3-pvm1 -y              # 移除非默认构建
-pvm qemu gc -y                          # 清理旧版 pvm 留下的目录
+pvm qemu                    # 已有构建、默认构建和推荐版本
+pvm qemu install -y         # 安装推荐的项目构建
+pvm qemu use official       # 使用 Homebrew、发行版或 MSYS2 的 QEMU
+pvm qemu check --default    # 退出码 0 正常，3 未配置，1 不合格
+pvm qemu gc -y              # 清理旧版本留下的目录
 ```
 
-每个构建在首次使用前和二进制变化后，都要通过最低版本、加速器与设备探测、用 pvm 自己的参数试启动和固件检查（macOS 上还要检查 hypervisor entitlement）；文件被改动过的项目构建会被拒绝。下载遵循 `HTTPS_PROXY`、`HTTP_PROXY` 和 `NO_PROXY`，中断后可以续传。daemon 没有 QEMU 也能运行，并且无需重启就能识别 `pvm qemu install` 或 `use` 的结果；在此之前，创建或启动虚拟机会失败并给出要运行的命令。RAM 快照只能恢复到写入它的同一构建。旧版 pvm 安装的 QEMU 与固定构建一致时会被收编为项目构建；其他旧目录保持不动，留给 `pvm qemu gc` 处理。
+每个构建在首次使用前和二进制变化后，都必须通过版本、加速器、设备、试启动和固件检查；文件被改动的项目构建会被拒绝。RAM 快照只能恢复到写入它的同一构建。没有 QEMU 时 daemon 照常运行，装好新构建后无需重启即可使用。
 
 ## 支持的镜像和宿主机
 
-- 镜像：`ubuntu:26.04`、`ubuntu:24.04`、`debian:13` 和 `debian:12`。
-- 宿主机：arm64 的 macOS（`darwin/arm64`）、amd64 的 Linux（`linux/amd64`），以及 amd64 的 Windows（`windows/amd64`，通过 WSL2 桥接或原生 QEMU/WHPX；可用 `PVM_BACKEND=auto|wsl|native` 或 `config.yaml` 中的 `backend` 选择）。
-- 虚拟机始终使用宿主机的原生架构，不支持跨架构模拟。Linux arm64 的发布二进制用于 VPS 出口 agent，不用于运行 pvm 宿主机。
+- 镜像：`ubuntu:26.04`、`ubuntu:24.04`、`debian:13`、`debian:12`。
+- 宿主机：arm64 的 macOS、amd64 的 Linux、amd64 的 Windows（原生 WHPX 或 WSL2）。
+- 虚拟机使用宿主机的架构，不支持跨架构模拟。Linux arm64 版本只用于 VPS 出口 agent。
 
 ## 在 VPS 上部署出口
 
-先校验对应 VPS 架构的发布包，并创建仅所有者可读的 token 文件，然后把出口 agent 作为常驻服务运行：
+下载并校验适合 VPS 的发布包，创建只有所有者可读的 token 文件，然后把出口 agent 安装为 systemd 服务：
 
 ```bash
-pvm exit-agent --listen :18443 --token-file /etc/pvm-exit/token
+pvm exit-agent install --listen :18443 --token-file /etc/pvm-exit/token
 ```
 
-然后在宿主机上用 `pvm exit add` 注册它。完整的 SSH 部署流程（包括 systemd unit、指纹校验、测速和回滚）见 [SKILL.md](SKILL.md#standard-flow-deploy-an-exit-over-ssh)。
+再在宿主机上用 `pvm exit add` 注册。经 SSH 部署的完整流程（含指纹核对、测速和回滚）见 [SKILL.md](SKILL.md#standard-flow-deploy-an-exit-over-ssh)。
 
-VPS 防火墙必须放行 TCP 18443（控制面，`--listen`）、UDP 18443（WireGuard over UDP，`--udp-port`）和 TCP 18444（WireGuard over TCP，`--tcp-port`）。使用 `nft` 或 `iptables` NAT 后端时，还必须允许转发出口 agent 的 TUN 设备流量：UDP 传输为 `pvmexit0`，TCP 传输为 `pvmexit1`（前缀随 `--tun-prefix` 变化）。出口 agent 自己的 nftables 表无法覆盖转发路径上其他地方的丢弃规则，例如 ufw 默认的 `deny (routed)`。这种情况下 `pvm exit test` 仍然通过，因为它只探测出口 agent 本身，但经该出口路由的虚拟机无法向互联网建立连接，ping 却可能仍然正常。使用 ufw 时放行转发，并把 `eth0` 换成 VPS 的公网网卡：
+VPS 防火墙需要放行 TCP 18443（控制面）、UDP 18443（WireGuard over UDP）和 TCP 18444（WireGuard over TCP），并允许转发 agent 的 `pvmexit0`、`pvmexit1` 设备的流量。ufw 默认的 `deny (routed)` 会拦截这种转发，需要放行（把 `eth0` 换成 VPS 的公网网卡）：
 
 ```bash
 ufw route allow in on pvmexit0 out on eth0
 ufw route allow in on pvmexit1 out on eth0
 ```
 
-要让手机或笔记本用标准 WireGuard 客户端连接，可从 UDP 出口导出一份独立的客户端配置：
+手机或笔记本可以用标准 WireGuard 客户端连接：`pvm exit client-config my-exit --output phone.conf` 导出配置并显示二维码。每台设备用一份配置。它是普通的 IPv4 全局隧道，没有 pvm 的 DNS 和分流。
 
-```bash
-pvm exit client-config my-exit --output phone.conf
-```
+## 升级
 
-该命令会生成新的客户端密钥、在出口 agent 上登记，以 `0600` 权限写出配置文件，并显示供手机 App 扫描的二维码。每台设备执行一次。标准客户端只支持 UDP，得到的是全隧道 IPv4 VPN，不包含 pvm gateway 的 DNS 或分流规则。IPv6 不走隧道。
+`pvm upgrade` 校验新版本，检查它能否使用你当前的 QEMU，保存恢复点，替换二进制，重启 daemon，并启动之前在运行的虚拟机。它从不改动 QEMU 或 PVM Desktop。`pvm upgrade --rollback` 可回退。
+
+自动检查更新默认关闭；在 `~/.pvm/config.yaml` 里设置 `update_check: true` 开启。
+
+## 路线图
+
+近期版本（全部版本见 [docs/release-notes](docs/release-notes)）：
+
+- **v1.4.1**（进行中）：合并上游 v1.3.0-1.3.1，带来 Mihomo 出口、`pvm check`、`pvm diag`、`pvm dashboard`、`--json`、`pvm job`、`pvm ssh-config`、`pvm exit-agent install`、`pvm image default`、daemon 重启后恢复虚拟机，以及 macOS 和 Linux 上的剪贴板桥。
+- **v1.4.0**：`pvm qemu`，使用固定的 pvm-qemu 构建或本平台官方 QEMU；M1 Mac 上网关可以启动。
+- **v1.3.x**：PVM Desktop、应用目录、密钥环设置、`pvm app` 的窗口缩放和输入法。
+
+接下来：
+
+- 安装包和 `install.sh` 不再自带 QEMU，改由 `pvm qemu install` 安装（[计划](docs/design/qemu.md)）
+- WHPX：虚拟机内可用 AVX，并按虚拟机选择 QEMU
+- PVM Desktop：从安装包完整测试、自行更新、托盘图标，以及快照、端口映射和挂载的界面
+- `pvm desktop` 像 `pvm app` 一样作为宿主机窗口
+- WSL2 上的 `pvm app`
+- Windows CI 覆盖其余的包，并对安装包做冒烟测试
+
+细节和候选项见 [docs/roadmap.md](docs/roadmap.md)。
 
 ## 文档
 
-- [SKILL.md](SKILL.md)：面向 agent 和人的完整使用手册；`pvm skill` 会输出内嵌的副本。
-- [SECURITY.md](SECURITY.md)：宿主机/虚拟机信任边界、凭据、镜像来源和网络验证；`pvm security` 会输出内嵌的副本。
-- [AGENTS.md](AGENTS.md)：仓库结构、构建与测试流程以及开发规则。
-- `pvm upgrade` 会校验发布包、确认新版本接受你的默认 QEMU 构建、保存恢复点、替换已安装的二进制、重启正在运行的 daemon，并尝试恢复之前所有正在运行的用户虚拟机。它从不改动 QEMU 或 PVM Desktop。用 `--no-restart` 只替换二进制（之后运行 `pvm daemon restart`），用 `pvm upgrade --rollback` 恢复保存的二进制和虚拟机恢复计划。`--to` 不接受低于 v1.4.0 的版本；请改用 `--rollback` 或该版本的安装包。
-- `pvm audit dev1 --privacy`、`pvm doctor` 和 `pvm route explain dev1 example.com` 只检查本地配置，不启动 daemon，也不发起网络探测；输出中的可识别信息会被脱敏。
-- 自动更新检查默认关闭。在 `~/.pvm/config.yaml` 中设置 `update_check: true` 或设置 `PVM_UPDATE_CHECK=1` 可开启；`PVM_NO_UPDATE_CHECK=1` 可关闭。
-- 如需使用独立信任的镜像签名密钥，执行 `pvm image fetch ubuntu:26.04 --keyring /trusted/ubuntu-cloudimage.gpg`。这需要 `gpgv`；pvm 不会自动下载或信任任何密钥。
+- [SKILL.md](SKILL.md)：面向人和 agent 的完整手册；`pvm skill` 打印同一内容。
+- [SECURITY.md](SECURITY.md)（[简体中文](SECURITY.zh-CN.md)）：信任边界、凭据、镜像、QEMU 和网络检查；`pvm security` 打印英文版。
+- [AGENTS.md](AGENTS.md)：仓库地图、构建测试流程和开发规则。
 
 ## 开发
 
-完整构建使用 Go 1.27.4 和 garble v0.18.0，CI 中固定了这两个版本。构建使用专用的 `cmd/agent` 入口和可复现的混淆设置。
+构建使用 Go 1.27.4 和 garble v0.18.0，两者版本都在 CI 中固定。
 
 ```bash
 go install mvdan.cc/garble@v0.18.0
@@ -295,18 +256,11 @@ go install mvdan.cc/garble@v0.18.0
 go test ./...
 ```
 
-在 Windows 上，先安装 Git for Windows、Go 1.27.4 和 garble v0.18.0，然后在 PowerShell 中运行包装脚本。它通过 Git Bash 运行 `script/build.sh` 并生成 `pvm.exe`。所有构建都不包含 QEMU：请用 `pvm qemu install` 或 `pvm qemu use official` 设置。
+- Windows 上先安装 Git for Windows、Go 和 garble，然后在 PowerShell 里运行 `.\script\build.ps1`，它会生成 `pvm.exe`。
+- `./script/build-desktop.sh` 构建 `pvm-desktop.exe`，需要 Node.js 22；`go build ./...` 和 `go test ./...` 不需要。
+- 不要在 Windows 上运行全量 `go test ./...`：测试套件按 Unix 编写，许多测试会因无关原因失败。请只运行相关的定向测试（如 `go test ./internal/qemu -run Accel`），全量测试放在 Linux、macOS 或 WSL2 上。
+- 任何构建都不包含 QEMU。CI 会对照 pvm-qemu 的发布和构建证明核对固定的构建。
 
-```powershell
-go install mvdan.cc/garble@v0.18.0
-.\script\build.ps1
-.\pvm.exe version
-```
+## 许可证
 
-`./script/build-desktop.sh` 在任何装有 Go 和 Node.js 22（npm）的宿主机上构建 `pvm-desktop.exe`：先构建 `cmd/pvm-desktop/frontend` 里的前端，再交叉编译应用。`go build ./...` 和 `go test ./...` 不需要 Node.js，因为只有这个脚本会嵌入前端。
-
-不要在 Windows 宿主机上运行完整的 `go test ./...`。测试套件按 Unix 编写（文件权限位、`/tmp` 等路径、符号链接，以及 `ip`、`gh`、`bash` 等工具），在 Windows 上会有大量与改动无关的失败，而且 `internal/cli` 的测试会不断重新拉起自身，留下大量 `cli.test.exe` 进程。在 Windows 上只运行与改动相关的定向测试，例如 `go test ./internal/qemu -run Accel`；完整测试以 Linux 或 macOS（CI 或 WSL2）为准。
-
-CI 对每个提交在各原生平台上各测试、构建一次，缓存 Go 和构建工具，并按发布资产和证明核对固定的 pvm-qemu 构建。本仓库不构建、不打包 QEMU。发布可以复用同一提交在 master 上成功运行时已验证的产物。Linux namespace 测试必须实际运行，不能跳过。
-
-安全边界：用户虚拟机共享同一个二层网络；全局共享目录和额外的宿主机挂载是显式的信任边界。它们不是相互隔离的不可信租户。显式的 direct/internal 规则可以绕过默认出口。保证、限制和部署检查见 [SECURITY.md](SECURITY.md)。
+pvm 以 [MIT 许可证](LICENSE)发布。第三方许可证见 [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES)。
