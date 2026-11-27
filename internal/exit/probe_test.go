@@ -156,9 +156,12 @@ func TestProbeInProcessUserspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// a slow probe can use up the probing context; revoking must not need it
 	for _, p := range probes {
 		if p != winner {
-			RevokeProbe(ctx, srv.ControlAddr(), "test-token", fp, p)
+			if err := RevokeProbe(srv.ControlAddr(), "test-token", fp, p); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	if got := len(srv.store.List()); got != 1 {

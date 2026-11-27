@@ -9,8 +9,12 @@ import (
 )
 
 func TestParseDeployProbe(t *testing.T) {
-	got, err := parseDeployProbe("Linux\r\nx86_64\n1000\nme\npvm-exit=v1.4.1 /usr/local/bin/pvm-exit\nsudo=pass\n")
-	if err != nil || got != (deployTarget{arch: "amd64", user: "me", sudo: "pass", installed: "v1.4.1", path: "/usr/local/bin/pvm-exit"}) {
+	got, err := parseDeployProbe("Linux\r\nx86_64\n1000\nme\npvm-exit=v1.4.1 /usr/local/bin/pvm-exit\nlinger=yes\nsudo=pass\n")
+	if err != nil || got != (deployTarget{arch: "amd64", user: "me", sudo: "pass", installed: "v1.4.1", path: "/usr/local/bin/pvm-exit", linger: true}) {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+	got, err = parseDeployProbe("Linux\nx86_64\n1000\nme\nlinger=no\nsudo=pass\n")
+	if err != nil || got.linger {
 		t.Fatalf("got %+v, %v", got, err)
 	}
 	got, err = parseDeployProbe("Linux\nx86_64\n0\nroot\npvm-exit=v1.4.1 /usr/bin/pvm-exit\nsudo=root\n")
