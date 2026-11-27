@@ -14,7 +14,7 @@ set -euo pipefail
 XPRA_ZIP=Xpra-Light-x86_64_6.5.5-r0.zip
 XPRA_SHA256=878adf94ade4f04c888a9053edd940b0ff012ecfa5f23ce73a47a79c79ac45fe
 XPRA_KEY_FPR=B4993B57323148E37977E5D873254CAD17978FAF
-XPRA_BASE_URL=${XPRA_BASE_URL:-https://xpra.org/dists/windows}
+XPRA_BASE_URL=${XPRA_BASE_URL:-https://xpra.org/dists/MSWindows/x86_64}
 
 [ $# -eq 1 ] || { echo "usage: $0 <dest>" >&2; exit 2; }
 DEST=$1
