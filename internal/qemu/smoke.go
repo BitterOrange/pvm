@@ -46,7 +46,13 @@ func Smoke(b *Build) error {
 	if err := img("create", "-q", "-f", "qcow2", "-b", "base.qcow2", "-F", "qcow2", "disk.qcow2"); err != nil {
 		return err
 	}
-	for _, flag := range []string{"-B", "-b"} {
+	// Snapshots pass -B; compaction passes the flag this version takes.
+	v, _ := parseVersion("QEMU emulator version " + b.Version)
+	flags := []string{"-B"}
+	if f := convertBackingFlag(v); f != "-B" {
+		flags = append(flags, f)
+	}
+	for _, flag := range flags {
 		if err := img("convert", "-f", "qcow2", "-O", "qcow2", flag, "base.qcow2", "-F", "qcow2", "disk.qcow2", "out"+flag+".qcow2"); err != nil {
 			return fmt.Errorf("%v (convert %s)", err, flag)
 		}

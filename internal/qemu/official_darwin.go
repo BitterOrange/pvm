@@ -8,6 +8,9 @@ import (
 	"strings"
 )
 
+// officialFirmwareDirs: this channel keeps all firmware in FirmwareDir.
+var officialFirmwareDirs []string
+
 // DetectOfficial finds QEMU from Homebrew. The stable bin path is
 // registered, so a brew upgrade is noticed as a changed binary.
 func DetectOfficial() (*Official, error) {

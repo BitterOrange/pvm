@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+// officialFirmwareDirs are further directories the distribution's QEMU
+// searches for firmware: Debian and Ubuntu ship SeaBIOS in its own package
+// directory instead of linking it into /usr/share/qemu.
+var officialFirmwareDirs = []string{"/usr/share/seabios"}
+
 // DetectOfficial finds the distribution's QEMU in /usr/bin and requires a
 // package to own it: a binary installed by hand (make install, a copy) is
 // not an official build.

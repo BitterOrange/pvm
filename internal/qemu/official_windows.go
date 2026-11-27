@@ -10,6 +10,9 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
+// officialFirmwareDirs: this channel keeps all firmware in FirmwareDir.
+var officialFirmwareDirs []string
+
 // DetectOfficial finds QEMU from MSYS2 UCRT64, the build qemu.org links to
 // that installs without administrator rights. The pacman package entry
 // shows MSYS2 installed it.

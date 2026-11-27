@@ -493,3 +493,24 @@ func TestRemoveBrokenDefault(t *testing.T) {
 		t.Fatalf("state = %+v", st)
 	}
 }
+
+// Debian and Ubuntu keep SeaBIOS outside /usr/share/qemu, so the firmware
+// check looks through every directory the build searches.
+func TestFirmwarePresentSearchesEveryDir(t *testing.T) {
+	empty, seabios := t.TempDir(), t.TempDir()
+	if firmwarePresent([]string{empty, seabios}, "bios-256k.bin") {
+		t.Fatal("missing firmware reported present")
+	}
+	if err := os.WriteFile(filepath.Join(seabios, "bios-256k.bin"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if firmwarePresent([]string{empty, seabios}, "bios-256k.bin") {
+		t.Fatal("empty firmware reported present")
+	}
+	if err := os.WriteFile(filepath.Join(seabios, "bios-256k.bin"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !firmwarePresent([]string{empty, seabios}, "bios-256k.bin") {
+		t.Fatal("firmware in the second directory not found")
+	}
+}
