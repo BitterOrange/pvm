@@ -171,11 +171,19 @@ func ProbeAll(ctx context.Context, server, token, fingerprint string, transports
 	return out
 }
 
-func RevokeProbe(ctx context.Context, server, token, fingerprint string, p *TransportProbe) {
+// RevokeProbe removes the peer a losing or failed probe enrolled. It runs
+// on its own deadline: a slow probe can use up the probing context, which
+// must not leave its peer behind.
+func RevokeProbe(server, token, fingerprint string, p *TransportProbe) error {
 	if p == nil || p.Resp == nil {
-		return
+		return nil
 	}
-	_ = NewClient(server, token, fingerprint).DeletePeer(ctx, p.Resp.TunnelIP)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := NewClient(server, token, fingerprint).DeletePeer(ctx, p.Resp.TunnelIP); err != nil {
+		return fmt.Errorf("remove the %s probe's peer %s: %w", p.Transport, p.Resp.TunnelIP, err)
+	}
+	return nil
 }
 
 // ChooseTransport picks the winning transport:

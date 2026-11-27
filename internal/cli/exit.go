@@ -283,16 +283,21 @@ func exitAdd(args []string) int {
 			}
 			fmt.Printf("  %-4s avg %.1f MB/s  rtt %s\n", pr.Transport, pr.Mbps(), pr.RTT.Round(time.Millisecond))
 		}
+		revoke := func(pr *exit.TransportProbe) {
+			if err := exit.RevokeProbe(*server, *token, fp, pr); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: %v; it stays registered on the server: remove it there with `sudo pvm-exit peers` and `sudo pvm-exit token rm <id>`\n", err)
+			}
+		}
 		winner, err := exit.ChooseTransport(probes)
 		if err != nil {
 			for _, pr := range probes {
-				exit.RevokeProbe(ctx, *server, *token, fp, pr)
+				revoke(pr)
 			}
 			return fail("%v", err)
 		}
 		for _, pr := range probes {
 			if pr != winner {
-				exit.RevokeProbe(ctx, *server, *token, fp, pr)
+				revoke(pr)
 			}
 		}
 		fmt.Printf("selected transport: %s\n", winner.Transport)

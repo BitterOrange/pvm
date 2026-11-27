@@ -353,7 +353,7 @@ What it does:
 - Creates a one-time invite with `pvm-exit invite` and adds the exit with it. SSH has authenticated the VPS, so the fingerprint inside the invite is trusted without a manual check. The invite is never printed.
 
 Options:
-- The whole deploy is one SSH connection, so SSH asks for its password or key passphrase at most once. As a sudo user, the commands run under `sudo`; when sudo needs a password, pvm asks for it once on the host's terminal (three tries) and stops before changing anything if there is no terminal. `--user-mode` installs a systemd user service of the SSH user instead, with userspace NAT and ports from 1024; it stops at logout unless `loginctl enable-linger` is on.
+- The whole deploy is one SSH connection, so SSH asks for its password or key passphrase at most once. As a sudo user, the commands run under `sudo`; when sudo needs a password, pvm asks for it once on the host's terminal (three tries) and stops before changing anything if there is no terminal. `--user-mode` installs a systemd user service of the SSH user instead, with userspace NAT and ports from 1024; it would stop when the SSH session ends, so deploy requires lingering for that user (`sudo loginctl enable-linger USER`, run by an administrator) and stops before changing anything without it.
 - `--public-endpoint HOST` when clients reach the VPS by another name than the SSH host. `--client NAME` names this host's token (default: the hostname). `--ssh-opt=-p --ssh-opt=2222` passes SSH arguments.
 - `--migrate` takes over a VPS deployed with `pvm exit-agent install`; see below.
 - A VPS with the `.deb` installed keeps it: deploy only creates the invite, and refuses `--binary` or another `--tag` (upgrade the package instead).

@@ -204,7 +204,7 @@ The VPS runs `pvm-exit`, a server-only binary. One command on your host installs
 pvm exit deploy my-exit --ssh root@vps.example.com
 ```
 
-SSH authenticates the VPS, so the certificate fingerprint comes with a one-time invite and no token is copied by hand. With a sudo user the system service is installed; `--user-mode` installs a systemd user service with userspace NAT and no root at all.
+SSH authenticates the VPS, so the certificate fingerprint comes with a one-time invite and no token is copied by hand. With a sudo user the system service is installed; `--user-mode` installs a systemd user service with userspace NAT and no root at all; it needs lingering for that user (`sudo loginctl enable-linger USER`, once, by an administrator), or the service stops at logout.
 
 The system service runs as the `pvm-exit` user, with `CAP_NET_ADMIN` and `CAP_NET_RAW` for kernel NAT and no capabilities for userspace NAT. Its settings are in `/etc/pvm-exit/config.yaml`. To set up the VPS yourself instead, use the `.deb` from the release (`sudo apt install ./pvm-exit_<version>_amd64.deb`) or `scripts/install-exit.sh`, then create an invite there:
 

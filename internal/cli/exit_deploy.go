@@ -39,6 +39,7 @@ const inviteMarker = "PVM-INVITE "
 const deployProbe = `uname -s; uname -m; id -u; id -un
 if [ -f /usr/lib/systemd/system/pvm-exit.service ]; then p=/usr/bin/pvm-exit; else p=$(command -v pvm-exit || echo "$HOME/.local/bin/pvm-exit"); fi
 if v=$("$p" version 2>/dev/null); then echo "pvm-exit=$v $p"; fi
+echo "linger=$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null)"
 if [ "$(id -u)" = 0 ]; then echo sudo=root; elif ! command -v sudo >/dev/null 2>&1; then echo sudo=none; elif sudo -n true 2>/dev/null; then echo sudo=nopass; else echo sudo=pass; fi
 `
 
@@ -89,6 +90,7 @@ type deployTarget struct {
 	installed string // version of the pvm-exit already there, if any
 	path      string // where that pvm-exit is
 	packaged  bool   // that pvm-exit came from the .deb
+	linger    bool   // the user's services keep running after logout
 }
 
 // releaseWanted is the pvm-exit release to install: --tag, else this
@@ -209,6 +211,11 @@ func exitDeploy(args []string) int {
 	}
 	if *userMode && t.root {
 		return stop("--user-mode needs a regular ssh user, not root")
+	}
+	// Without lingering, systemd stops the user service when this ssh
+	// session ends, before the exit is added, and the invite is wasted.
+	if *userMode && !t.linger {
+		return stop("--user-mode: lingering is off for %s, so its services stop when this ssh session ends; ask an administrator of the VPS to run `sudo loginctl enable-linger %s` and rerun, or deploy as root or a sudo user without --user-mode; nothing was changed", t.user, t.user)
 	}
 	useSudo := !*userMode && !t.root
 	if useSudo && t.sudo == "none" {
@@ -385,6 +392,8 @@ func parseDeployProbe(out string) (deployTarget, error) {
 			t.packaged = t.path == "/usr/bin/pvm-exit"
 		} else if v, ok := strings.CutPrefix(l, "sudo="); ok {
 			t.sudo = v
+		} else if v, ok := strings.CutPrefix(l, "linger="); ok {
+			t.linger = v == "yes"
 		}
 	}
 	if t.sudo == "" {
