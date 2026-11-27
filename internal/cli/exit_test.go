@@ -252,4 +252,22 @@ func TestExitAddWithInvite(t *testing.T) {
 	if _, err := exit.LoadEntry(dir, "again"); err == nil {
 		t.Fatal("a failed invite must not leave an entry")
 	}
+
+	// --invite-file, as PVM Desktop passes it
+	created, err = ac.CreateInvite(ctx, exit.CreateInviteRequest{Name: "desktop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "invite")
+	if err := os.WriteFile(f, []byte(exit.Invite{Server: admin.Server, Fingerprint: admin.Fingerprint, Secret: created.Secret}.String()+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := exitAdd([]string{"x", "--invite-file", f, "--invite", invite}); code == 0 {
+		t.Fatal("--invite-file with --invite must be refused")
+	}
+	if code, out := captureStdout(t, func() int {
+		return exitAdd([]string{"from-file", "--invite-file", f, "--transport", "udp"})
+	}); code != 0 || !strings.Contains(out, "(desktop, role enroll)") {
+		t.Fatalf("exit add --invite-file code = %d, output:\n%s", code, out)
+	}
 }

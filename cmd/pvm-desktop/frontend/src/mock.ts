@@ -502,9 +502,13 @@ const backend: Backend = {
   SetDefaultExit: (via) => one("Default exit: " + via, "pvm route default --via " + via, ["default -> " + via], () => (defaultExit = via)),
   CreateVM: (r) => (machines.some((m) => m.name === r.name) ? refuse("vm " + r.name + " already exists") : runTask("Create " + r.name, createSteps(r))),
   AddExit: (r) =>
-    one("Add exit " + r.name, "pvm exit add " + r.name + " --server " + r.server + " --token-file <token file>", ["probing " + r.server, "added " + r.name], () =>
-      nodes.push({ name: r.name, kind: "agent", endpoint: r.server, tz: "", locale: "", rules: [] }),
-    ),
+    r.invite
+      ? one("Add exit " + r.name, "pvm exit add " + r.name + " --invite <invite>", ["invite redeemed", "added " + r.name], () =>
+          nodes.push({ name: r.name, kind: "agent", endpoint: "vps.example.com:18443", tz: "", locale: "", rules: [] }),
+        )
+      : one("Add exit " + r.name, "pvm exit add " + r.name + " --server " + r.server + " --token-file <token file>", ["probing " + r.server, "added " + r.name], () =>
+          nodes.push({ name: r.name, kind: "agent", endpoint: r.server, tz: "", locale: "", rules: [] }),
+        ),
   AddWarpExit: (name) =>
     one("Add exit " + name, "pvm exit add-warp " + name, ["registering a WARP device", "added " + name], () =>
       nodes.push({ name, kind: "warp", endpoint: "", tz: "", locale: "", rules: [] }),

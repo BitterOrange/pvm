@@ -508,6 +508,15 @@ func TestRefusals(t *testing.T) {
 		"add exit two tokens": task(func() (Task, error) {
 			return app.AddExit(AddExitRequest{Name: "my-exit2", Server: "vps.example.com:18443", Token: "a b"})
 		}),
+		"add exit invite and token": task(func() (Task, error) {
+			return app.AddExit(AddExitRequest{Name: "my-exit2", Invite: "pvmx1:abc", Token: "YOUR_TOKEN"})
+		}),
+		"add exit not an invite": task(func() (Task, error) {
+			return app.AddExit(AddExitRequest{Name: "my-exit2", Invite: "--server"})
+		}),
+		"add exit invite two words": task(func() (Task, error) {
+			return app.AddExit(AddExitRequest{Name: "my-exit2", Invite: "pvmx1:abc def"})
+		}),
 		"add warp":            task(func() (Task, error) { return app.AddWarpExit("my warp") }),
 		"test exit":           task(func() (Task, error) { return app.TestExit("--speed", false) }),
 		"remove exit":         task(func() (Task, error) { return app.RemoveExit("my-exit", false) }),
@@ -1216,5 +1225,44 @@ func TestQEMUSetupUnderWSL(t *testing.T) {
 	}
 	if _, err := f.app.InstallQEMUFromFile("relative.tar.gz"); err == nil {
 		t.Error("InstallQEMUFromFile took a relative path")
+	}
+}
+
+// An invite is a one-time secret: like a token it goes to the CLI in a
+// private file, never on the command line or to the page.
+func TestInviteStaysInTheBackend(t *testing.T) {
+	const invite = "pvmx1:YOUR_INVITE"
+	f := newFixture(t)
+	inviteFile := ""
+	f.runner.during = func(c command, line func(string)) {
+		if slices.Contains(c.argv, invite) {
+			t.Errorf("the invite is on the command line: %q", c.argv)
+		}
+		inviteFile = c.argv[len(c.argv)-1]
+		if filepath.Dir(inviteFile) != f.app.p.Run {
+			t.Errorf("invite file %s is not in the run directory", inviteFile)
+		}
+		if data, _ := os.ReadFile(inviteFile); strings.TrimSpace(string(data)) != invite {
+			t.Errorf("invite file holds %q", data)
+		}
+		line("redeeming " + invite)
+	}
+	tk, err := f.app.AddExit(AddExitRequest{Name: "my-exit2", Invite: invite})
+	if err != nil || !tk.OK {
+		t.Fatalf("add exit: %+v, %v", tk, err)
+	}
+	ran := f.runner.argvs()
+	if want := "exit add my-exit2 --invite-file " + inviteFile; ran[len(ran)-1] != want {
+		t.Fatalf("ran %q, want %q", ran[len(ran)-1], want)
+	}
+	if _, err := os.Stat(inviteFile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("invite file left behind: %v", err)
+	}
+	data, err := json.Marshal([]any{tk, f.events})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "YOUR_INVITE") || !strings.Contains(string(data), "redeeming ***") {
+		t.Fatalf("the page got the invite or lost the line: %s", data)
 	}
 }

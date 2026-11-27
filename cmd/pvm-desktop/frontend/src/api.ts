@@ -151,6 +151,7 @@ export interface Resources {
 
 export interface AddExitRequest {
   name: string;
+  invite: string;
   server: string;
   token: string;
 }
