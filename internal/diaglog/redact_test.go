@@ -16,6 +16,7 @@ func TestRedactPatternsAndIdempotence(t *testing.T) {
 		"api request with ghp_abcdefghijklmnop123456 and sk-abcdefghijklmnop1234",
 		"-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk=\n-----END OPENSSH PRIVATE KEY-----",
 		"path /Users/alice/project and /home/bob/.pvm and C:\\Users\\carol\\work",
+		`json "C:\\Users\\dave\\.pvm"`,
 		"exit 198.51.100.99 and 8.8.4.4 vs private 10.0.2.2 100.99.1.5 192.168.1.1 doc 203.0.113.5",
 		"-----BEGIN PRIVATE KEY-----\nunterminated-block",
 	}, "\n")
@@ -24,7 +25,7 @@ func TestRedactPatternsAndIdempotence(t *testing.T) {
 	for _, forbidden := range []string{
 		"\x1b[", "supersecrettoken123", "YOUR_TOKEN", "deskpass123", "wG0secretKeyMaterial",
 		"ghp_abcdefghijklmnop", "sk-abcdefghijklmnop", "b3BlbnNzaC1rZXk", "unterminated-block",
-		"/Users/alice", "/home/bob", `\Users\carol`, "8.8.4.4",
+		"/Users/alice", "/home/bob", `\Users\carol`, "dave", "8.8.4.4",
 	} {
 		if strings.Contains(got, forbidden) {
 			t.Errorf("redacted output still contains %q:\n%s", forbidden, got)
@@ -32,7 +33,7 @@ func TestRedactPatternsAndIdempotence(t *testing.T) {
 	}
 	for _, kept := range []string{
 		"keepPubKey0000=", "proxy.example.com", "resize=scale",
-		"/Users/[user]/project", "/home/[user]/.pvm", `C:\Users\[user]\work`,
+		"/Users/[user]/project", "/home/[user]/.pvm", `C:\Users\[user]\work`, `C:\\Users\\[user]\\.pvm`,
 		"10.0.2.2", "100.99.1.5", "192.168.1.1", "203.0.113.5", "198.51.100.99",
 	} {
 		if !strings.Contains(got, kept) {

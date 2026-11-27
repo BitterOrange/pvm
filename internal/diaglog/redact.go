@@ -23,8 +23,9 @@ var (
 	tokenRE      = regexp.MustCompile(`\b(?:gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,}|sk-[A-Za-z0-9_-]{16,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,})\b`)
 
 	unixHomeRE = regexp.MustCompile(`/(?:Users|home)/[^/\s:"'\\]+`)
-	winHomeRE  = regexp.MustCompile(`(?i)\b[A-Z]:\\Users\\[^\\\s:"']+`)
-	ipv4RE     = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
+	// JSON escapes each backslash, so one or two separate the parts.
+	winHomeRE = regexp.MustCompile(`(?i)\b([A-Z]:\\{1,2}Users\\{1,2})[^\\\s:"']+`)
+	ipv4RE    = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
 )
 
 var docIPv4Prefixes = []string{"192.0.2.", "198.51.100.", "203.0.113."}
@@ -119,10 +120,7 @@ func Redact(s string) string {
 		}
 		return "/home/[user]"
 	})
-	s = winHomeRE.ReplaceAllStringFunc(s, func(m string) string {
-		i := strings.Index(strings.ToLower(m), `\users\`) + len(`\users\`)
-		return m[:i] + "[user]"
-	})
+	s = winHomeRE.ReplaceAllString(s, "${1}[user]")
 	s = ipv4RE.ReplaceAllStringFunc(s, func(m string) string {
 		if isPublicIPv4Literal(m) {
 			return "[ip]"
