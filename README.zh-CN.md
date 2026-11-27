@@ -212,7 +212,7 @@ SSH 已经验证了 VPS 的身份，所以证书指纹随一次性邀请串一�
 sudo pvm-exit invite laptop        # 输出：pvm exit add my-exit --invite pvmx1:...
 ```
 
-邀请串只能用一次，15 分钟后过期。它给宿主机发放一个独立的 token，只能注册 peer，不能管理服务器；用 `pvm-exit token ls` 和 `pvm-exit token rm <id>` 查看和吊销。已经用 `pvm exit-agent install` 部署的 VPS，用 `pvm-exit init --migrate`（或 `pvm exit deploy ... --migrate`）迁移，token、指纹和 peer 都保留；`pvm exit-agent` 在 v1.5.0 删除。详见 [SKILL.md](SKILL.md#standard-flow-deploy-an-exit-over-ssh)。
+邀请串只能用一次，15 分钟后过期。它给宿主机发放一个独立的 token，只能注册 peer，不能管理服务器；用 `pvm-exit token ls` 和 `pvm-exit token rm <id>` 查看和吊销；`pvm exit rm` 在本机 token 不再有 peer 时也会吊销它。已经用 `pvm exit-agent install` 部署的 VPS，用 `pvm-exit init --migrate`（或 `pvm exit deploy ... --migrate`）迁移，token、指纹和 peer 都保留；`pvm exit-agent` 在 v1.5.0 删除。详见 [SKILL.md](SKILL.md#standard-flow-deploy-an-exit-over-ssh)。
 
 VPS 防火墙需要放行 TCP 18443（控制面）、UDP 18443（WireGuard over UDP）和 TCP 18444（WireGuard over TCP），并允许转发 `pvmexit0`、`pvmexit1` 设备的流量。ufw 默认的 `deny (routed)` 会拦截这种转发，需要放行（把 `eth0` 换成 VPS 的公网网卡）：
 

@@ -212,7 +212,7 @@ The system service runs as the `pvm-exit` user, with `CAP_NET_ADMIN` and `CAP_NE
 sudo pvm-exit invite laptop        # prints: pvm exit add my-exit --invite pvmx1:...
 ```
 
-An invite works once and expires after 15 minutes. It gives the host its own token, which can register peers but not manage the server; `pvm-exit token ls` and `pvm-exit token rm <id>` list and revoke them. A VPS running `pvm exit-agent install` moves over with `pvm-exit init --migrate` (or `pvm exit deploy ... --migrate`), keeping its token, fingerprint and peers; `pvm exit-agent` is removed in v1.5.0. [SKILL.md](SKILL.md#standard-flow-deploy-an-exit-over-ssh) has the details.
+An invite works once and expires after 15 minutes. It gives the host its own token, which can register peers but not manage the server; `pvm-exit token ls` and `pvm-exit token rm <id>` list and revoke them, and `pvm exit rm` revokes the host's own token once it has no peer left. A VPS running `pvm exit-agent install` moves over with `pvm-exit init --migrate` (or `pvm exit deploy ... --migrate`), keeping its token, fingerprint and peers; `pvm exit-agent` is removed in v1.5.0. [SKILL.md](SKILL.md#standard-flow-deploy-an-exit-over-ssh) has the details.
 
 The VPS firewall must accept TCP 18443 (control), UDP 18443 (WireGuard over UDP) and TCP 18444 (WireGuard over TCP), and must forward traffic from the `pvmexit0` and `pvmexit1` devices. ufw's default `deny (routed)` blocks that forwarding; allow it, with `eth0` replaced by the internet-facing interface:
 

@@ -45,7 +45,7 @@ if [ "$1" = configure ]; then
   if pvm-exit init --packaged; then
     echo "pvm-exit is running; create a client invite with: sudo pvm-exit invite <client-name>"
   else
-    echo "pvm-exit is installed but not started; fix the error above and run: sudo pvm-exit init --packaged" >&2
+    echo "pvm-exit is installed but not started; fix the error above, then run the command it names (by default: sudo pvm-exit init --packaged)" >&2
   fi
 fi
 exit 0
@@ -67,6 +67,8 @@ if [ -d /run/systemd/system ]; then
   systemctl daemon-reload >/dev/null 2>&1 || true
 fi
 if [ "$1" = purge ]; then
+  rm -f /etc/systemd/system/pvm-exit.service.d/10-userspace-nat.conf
+  rmdir /etc/systemd/system/pvm-exit.service.d 2>/dev/null || true
   echo "kept /etc/pvm-exit and /var/lib/pvm-exit (admin token, certificate, peers) and the pvm-exit user; delete them by hand if you no longer need them"
 fi
 exit 0

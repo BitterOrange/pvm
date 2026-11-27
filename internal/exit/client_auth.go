@@ -63,3 +63,16 @@ func (c *Client) DeleteToken(ctx context.Context, id string, keepPeers bool) (in
 	}
 	return v.PeersRemoved, nil
 }
+
+// RevokeSelf revokes the client's own enroll token if it owns no peer. It
+// reports whether the token was revoked and, if not, why.
+func (c *Client) RevokeSelf(ctx context.Context) (bool, string, error) {
+	var v struct {
+		Revoked bool   `json:"revoked"`
+		Reason  string `json:"reason"`
+	}
+	if err := c.do(ctx, "DELETE", "/v1/tokens/self", nil, &v); err != nil {
+		return false, "", err
+	}
+	return v.Revoked, v.Reason, nil
+}

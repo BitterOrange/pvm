@@ -357,6 +357,7 @@ func (s *Server) Start() (string, error) {
 	mux.HandleFunc("DELETE /v1/invites/{id}", s.withAuth(RoleAdmin, s.handleDeleteInvite))
 	mux.HandleFunc("GET /v1/tokens", s.withAuth(RoleAdmin, s.handleListTokens))
 	mux.HandleFunc("DELETE /v1/tokens/{id}", s.withAuth(RoleAdmin, s.handleDeleteToken))
+	mux.HandleFunc("DELETE /v1/tokens/self", s.withAuth(RoleEnroll, s.handleRevokeSelf))
 	s.http = &http.Server{
 		Addr:    s.cfg.Listen,
 		Handler: mux,

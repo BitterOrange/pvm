@@ -258,7 +258,11 @@ func cmdInit(args []string) int {
 			return fail("%v", err)
 		}
 	} else if _, err := os.Stat(legacyUnitPath); err == nil && mode == ModeSystem {
-		return fail("a `pvm exit-agent` service is installed here (%s); rerun with --migrate to take over its token, certificate and peers", legacyUnitPath)
+		rerun := "sudo pvm-exit init --migrate"
+		if *packaged {
+			rerun = "sudo pvm-exit init --packaged --migrate"
+		}
+		return fail("a `pvm exit-agent` service is installed here (%s); run `%s` to take over its token, certificate and peers", legacyUnitPath, rerun)
 	}
 	for _, o := range []struct {
 		flag string
@@ -368,6 +372,16 @@ func cmdInit(args []string) int {
 				return fail("%v", err)
 			}
 			fmt.Printf("moved %s to %s.bak; the package's %s is used now\n", systemUnitPath, systemUnitPath, PackagedUnitPath)
+		}
+		if cfg.NAT == exit.NATUserspace {
+			if err := os.MkdirAll(filepath.Dir(PackagedNATDropIn), 0o755); err != nil {
+				return fail("%v", err)
+			}
+			if err := fsutil.AtomicWrite(PackagedNATDropIn, []byte(PackagedNATDropInContent), 0o644); err != nil {
+				return fail("write %s: %v", PackagedNATDropIn, err)
+			}
+		} else if err := os.Remove(PackagedNATDropIn); err != nil && !os.IsNotExist(err) {
+			return fail("%v", err)
 		}
 	} else if err := fsutil.AtomicWrite(unitPath, []byte(unit), 0o644); err != nil {
 		return fail("write unit: %v", err)

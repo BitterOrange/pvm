@@ -60,7 +60,8 @@ sudo-pw)
   n=0
   while :; do
     IFS= read -r pw || exit 1
-    if printf '%s\n' "$pw" | sudo -S -p '' -v 2>/dev/null; then echo PVM-SUDO-OK; break; fi
+    if e=$(printf '%s\n' "$pw" | sudo -S -p '' -v 2>&1); then echo PVM-SUDO-OK; break; fi
+    case "$e" in *tty*|*terminal*) echo PVM-SUDO-TTY; exit 1 ;; esac
     n=$((n+1))
     echo PVM-SUDO-BAD
     [ "$n" -lt 3 ] || exit 1
@@ -273,6 +274,10 @@ func exitDeploy(args []string) int {
 			}
 			if reply == "PVM-SUDO-OK" {
 				break
+			}
+			if reply == "PVM-SUDO-TTY" {
+				_ = sess.Wait()
+				return fatalf("sudo on %s requires a terminal (requiretty), which this deploy cannot give it; nothing was changed. Allow the commands without a password (NOPASSWD), drop requiretty for %s, or use --user-mode", *target, t.user)
 			}
 			if try == 3 {
 				stdin.Close()

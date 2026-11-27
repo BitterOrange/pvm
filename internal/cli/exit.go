@@ -548,8 +548,14 @@ func exitRm(args []string) int {
 	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		if err := exit.NewClient(e.Server, e.Token, e.Fingerprint).DeletePeer(ctx, e.TunnelIP); err != nil {
+		c := exit.NewClient(e.Server, e.Token, e.Fingerprint)
+		if err := c.DeletePeer(ctx, e.TunnelIP); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: revoke on server failed (continuing): %v\n", err)
+		} else if revoked, _, err := c.RevokeSelf(ctx); err != nil && !strings.Contains(err.Error(), "404 Not Found") {
+			// a server without the route predates per-host tokens
+			fmt.Fprintf(os.Stderr, "warning: the peer was removed but this host's token was not revoked (%v); revoke it on the VPS with `sudo pvm-exit token rm <id>`\n", err)
+		} else if revoked {
+			fmt.Println("revoked this host's token on the server")
 		}
 	}
 	if err := exit.RemoveEntry(dir, args[0]); err != nil {

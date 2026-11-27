@@ -82,3 +82,11 @@ func pingRangeAllows(s string, gid int) bool {
 
 // PackagedUnitPath is where the .deb installs the system unit.
 const PackagedUnitPath = "/usr/lib/systemd/system/" + unitName
+
+// PackagedNATDropIn takes the network capabilities away from the
+// package's unit, which grants them for kernel NAT, when the config uses
+// userspace NAT.
+const PackagedNATDropIn = "/etc/systemd/system/" + unitName + ".d/10-userspace-nat.conf"
+
+// PackagedNATDropInContent empties both capability sets.
+const PackagedNATDropInContent = "# written by pvm-exit init: userspace NAT needs no capabilities\n[Service]\nAmbientCapabilities=\nCapabilityBoundingSet=\n"

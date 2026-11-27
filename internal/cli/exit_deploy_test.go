@@ -30,7 +30,7 @@ func TestParseDeployProbe(t *testing.T) {
 
 func linuxSh(t *testing.T) string {
 	sh, err := exec.LookPath("sh")
-	if err != nil || runtime.GOOS == "windows" {
+	if err != nil || runtime.GOOS != "linux" {
 		t.Skip("runs on the Linux side of a deploy")
 	}
 	return sh

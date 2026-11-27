@@ -32,9 +32,7 @@ func TestResizeSetsCPUsAndMemory(t *testing.T) {
 		return loaded
 	}
 
-	oldHost := hostMemMB
-	hostMemMB = func() int { return 16384 }
-	defer func() { hostMemMB = oldHost }()
+	fakeHostMem(t, 16384)
 	for body, want := range map[string]string{
 		`{}`:                          "nothing to change",
 		`{"cpus":65}`:                 "cpus 65 out of range",
@@ -69,8 +67,17 @@ func TestResizeSetsCPUsAndMemory(t *testing.T) {
 	}
 }
 
+// fakeHostMem fixes the host's physical memory for one test, so the mem_mb
+// bound does not depend on the machine running it.
+func fakeHostMem(t *testing.T, mb int) {
+	old := hostMemMB
+	hostMemMB = func() int { return mb }
+	t.Cleanup(func() { hostMemMB = old })
+}
+
 // A RAM snapshot restores only into the machine it was taken from.
 func TestResizeKeepsSnapshotMachine(t *testing.T) {
+	fakeHostMem(t, 16384)
 	s, spec, _ := newMountTestServer(t)
 	spec.CPUs, spec.MemMB = 2, 4096
 	if err := spec.Save(s.P); err != nil {

@@ -205,3 +205,50 @@ func TestEnrollTokenScopeEndToEnd(t *testing.T) {
 		t.Fatalf("after revoke only the admin peer must remain, got %+v, %v", all, err)
 	}
 }
+
+// `pvm exit rm` revokes the host's token only once its last peer is gone,
+// and never an admin token.
+func TestRevokeSelf(t *testing.T) {
+	srv, _ := inProcessServer(t, "udp")
+	addr := srv.ControlAddr()
+	fp, err := ProbeFingerprint(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), testOpTimeout)
+	defer cancel()
+	admin := NewClient(addr, "test-token", fp)
+	if revoked, reason, err := admin.RevokeSelf(ctx); err != nil || revoked || reason != "admin token" {
+		t.Fatalf("admin self-revoke = %v %q %v", revoked, reason, err)
+	}
+	inv, err := admin.CreateInvite(ctx, CreateInviteRequest{Name: "laptop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	red, err := NewClient(addr, "", fp).Redeem(ctx, inv.Secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := NewClient(addr, red.Token, fp)
+	priv, _ := tunnel.GenerateKey()
+	pub, _ := tunnel.PublicKey(priv)
+	peer, err := user.Enroll(ctx, pub, "laptop", "udp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revoked, _, err := user.RevokeSelf(ctx); err != nil || revoked {
+		t.Fatalf("a token with a peer must be kept: %v %v", revoked, err)
+	}
+	if err := user.DeletePeer(ctx, peer.TunnelIP); err != nil {
+		t.Fatal(err)
+	}
+	if revoked, _, err := user.RevokeSelf(ctx); err != nil || !revoked {
+		t.Fatalf("a token without peers must be revoked: %v %v", revoked, err)
+	}
+	if _, err := user.ListPeers(ctx); err == nil || !strings.Contains(err.Error(), "401") {
+		t.Fatalf("the revoked token must be unauthorized, got %v", err)
+	}
+	if toks, err := admin.ListTokens(ctx); err != nil || len(toks) != 0 {
+		t.Fatalf("tokens after self-revoke = %+v, %v", toks, err)
+	}
+}

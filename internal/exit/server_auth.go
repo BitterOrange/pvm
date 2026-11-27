@@ -136,3 +136,30 @@ func (s *Server) handleDeleteToken(w http.ResponseWriter, r *http.Request, _ pri
 	}
 	writeJSON(w, map[string]any{"removed": id, "peers_removed": removed})
 }
+
+// handleRevokeSelf lets a client revoke its own enroll token once it owns
+// no peer, which is what `pvm exit rm` leaves behind. An admin token, or
+// one another of the caller's peers still uses, is kept.
+func (s *Server) handleRevokeSelf(w http.ResponseWriter, _ *http.Request, who principal) {
+	s.peerMu.Lock()
+	defer s.peerMu.Unlock()
+	if s.isClosed() {
+		http.Error(w, `{"error":"server closed"}`, http.StatusServiceUnavailable)
+		return
+	}
+	if who.Role == RoleAdmin {
+		writeJSON(w, map[string]any{"revoked": false, "reason": "admin token"})
+		return
+	}
+	for _, p := range s.store.List() {
+		if p.Owner == who.ID {
+			writeJSON(w, map[string]any{"revoked": false, "reason": "the token still has peers"})
+			return
+		}
+	}
+	if _, _, err := s.auth.removeToken(who.ID); err != nil {
+		http.Error(w, `{"error":"store"}`, http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{"revoked": true, "id": who.ID})
+}
