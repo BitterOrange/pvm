@@ -75,6 +75,9 @@ exit 0
 EOF
 chmod 0755 "$stage/DEBIAN/postinst" "$stage/DEBIAN/prerm" "$stage/DEBIAN/postrm"
 
+# The file is named after the tag: GitHub renames a "~" in a release
+# asset, which would no longer match its line in SHA256SUMS.
+file="$out/pvm-exit_${tag#v}_${arch}.deb"
 mkdir -p "$out"
-dpkg-deb --root-owner-group --build "$stage" "$out/pvm-exit_${ver}_${arch}.deb" >/dev/null
-echo "$out/pvm-exit_${ver}_${arch}.deb"
+dpkg-deb --root-owner-group --build "$stage" "$file" >/dev/null
+echo "$file"
