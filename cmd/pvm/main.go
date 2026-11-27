@@ -72,8 +72,10 @@ network:
   dns           inspect fake-ip mappings: pvm dns ls
   exit          manage exit nodes: add (--transport auto=probe&pick fastest) | add-warp | set | ls | rm | test [--speed]
                 add cloudflare warp: pvm exit add-warp my-warp
+                set up a vps over ssh and add it: pvm exit deploy my-exit --ssh root@vps.example.com [--user-mode]
+                join an exit with an invite: pvm exit add my-exit --invite <pvmx1:...|->
                 export a standard wireguard client: pvm exit client-config my-exit [-o phone.conf]
-  exit-agent    run the vps exit agent: pvm exit-agent --listen :18443 --token-file <private-file>
+  exit-agent    legacy vps exit agent, replaced by pvm-exit (removed in v1.5.0): pvm exit-agent --listen :18443 --token-file <private-file>
 
 image:
   image fetch   download a base image (ubuntu:26.04, debian:13)
@@ -103,7 +105,7 @@ other:
 common choices:
   images        ubuntu:26.04 | ubuntu:24.04 | debian:13 | debian:12
   transports    udp (default, wireguard) | tcp (wireguard over tcp; pvm exits only)
-  providers     pvm exit-agent | cloudflare warp (udp only)
+  providers     pvm-exit | cloudflare warp (udp only)
   nat backends  auto | nft | iptables | userspace (no root; icmp via ping socket)
   route via     direct | <exit-name>  (for example: my-exit)
   backend       auto | native | wsl (windows only; PVM_BACKEND or config.yaml backend)

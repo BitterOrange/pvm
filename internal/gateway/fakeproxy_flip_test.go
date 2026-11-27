@@ -141,3 +141,35 @@ func TestProxyCloseClosesTrackedFlows(t *testing.T) {
 		t.Fatal("Close allowed new flow")
 	}
 }
+
+// A require-check VM that loses its lease must lose its relayed flows at
+// once, and must not get a new one tracked, while other VMs keep theirs.
+func TestSetPolicyResetsUnverifiedConnections(t *testing.T) {
+	eng := newFlipTestPolicy(t)
+	eng.SetVMExit("dev1", "my-exit")
+	eng.SetVMExit("dev2", "my-exit")
+	p := newFakeProxy(eng, "10.0.2.3", nil)
+	p.SetExitHooks(func(string) int { return 153 }, nil, nil)
+
+	src, up := net.Pipe()
+	defer src.Close()
+	defer up.Close()
+	p.track(&trackedConn{vm: "dev1", domain: "example.com", route: policy.Proxy, exit: "my-exit", src: src, up: up})
+	src2, up2 := net.Pipe()
+	defer src2.Close()
+	defer up2.Close()
+	p.track(&trackedConn{vm: "dev2", domain: "example.com", route: policy.Proxy, exit: "my-exit", src: src2, up: up2})
+
+	eng.SetUnverified(map[string]bool{"dev1": true})
+	p.SetPolicy(eng)
+
+	assertClosed(t, src, "an unverified VM's flow must be reset")
+	assertOpen(t, src2, "a verified VM's flow must stay open")
+
+	src3, up3 := net.Pipe()
+	defer src3.Close()
+	defer up3.Close()
+	if p.track(&trackedConn{vm: "dev1", domain: "example.com", route: policy.Proxy, exit: "my-exit", src: src3, up: up3}) {
+		t.Fatal("a flow dialed for an unverified VM was tracked")
+	}
+}

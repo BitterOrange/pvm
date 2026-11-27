@@ -79,15 +79,16 @@ func newFakeProxy(policy *gwpolicy.Engine, upstream string, vmByIP func(net.IP) 
 }
 
 // SetPolicy swaps the flow policy on config reload, then resets every
-// live flow whose decision flipped under the new policy: they must
-// re-dial via the new route, not keep leaking on the old one.
+// live flow whose decision flipped under the new policy, or whose VM lost
+// egress: they must re-dial via the new route, not keep leaking on the
+// old one.
 func (p *fakeProxy) SetPolicy(eng *gwpolicy.Engine) {
 	p.mu.Lock()
 	p.policy = eng
 	var kill []*trackedConn
 	for tc := range p.conns {
 		dec := eng.DecideFlow(tc.domain, nil, tc.vm)
-		if dec.Route != tc.route || dec.Exit != tc.exit || eng.IsPaused(tc.vm) {
+		if dec.Route != tc.route || dec.Exit != tc.exit || eng.EgressBlocked(tc.vm) {
 			kill = append(kill, tc)
 		}
 	}
@@ -266,7 +267,7 @@ func (p *fakeProxy) track(tc *trackedConn) bool {
 		return false
 	}
 	dec := p.policy.DecideFlow(tc.domain, nil, tc.vm)
-	if dec.Route != tc.route || dec.Exit != tc.exit || (tc.route == gwpolicy.Proxy && p.markFor(tc.exit) < 0) {
+	if dec.Route != tc.route || dec.Exit != tc.exit || p.policy.EgressBlocked(tc.vm) || (tc.route == gwpolicy.Proxy && p.markFor(tc.exit) < 0) {
 		return false
 	}
 	p.connectedLocked(tc.src)
@@ -285,8 +286,8 @@ func (p *fakeProxy) dialDirect(src *net.TCPConn, domain string, port int, vmName
 		log.Printf("fakeproxy: reserved probe has no direct target")
 		return
 	}
-	if p.curPolicy().IsPaused(vmName) {
-		log.Printf("fakeproxy: %s egress is paused; refusing %s", vmName, domain)
+	if p.curPolicy().EgressBlocked(vmName) {
+		log.Printf("fakeproxy: %s egress is blocked (paused or unverified); refusing %s", vmName, domain)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
@@ -315,16 +316,16 @@ func (p *fakeProxy) dialDirect(src *net.TCPConn, domain string, port int, vmName
 }
 
 func (p *fakeProxy) dialProxy(src *net.TCPConn, domain string, port int, exitName string, vmName string) {
-	if p.curPolicy().IsPaused(vmName) {
-		log.Printf("fakeproxy: %s egress is paused; refusing %s", vmName, domain)
+	if p.curPolicy().EgressBlocked(vmName) {
+		log.Printf("fakeproxy: %s egress is blocked (paused or unverified); refusing %s", vmName, domain)
 		return
 	}
 	p.mu.Lock()
 	mihomoFor := p.mihomoPortFor
 	p.mu.Unlock()
 	if mihomoFor != nil {
-		if port, ok := mihomoFor(exitName); ok {
-			up, err := socks5Dial(context.Background(), net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), domain, port)
+		if mihomoPort, ok := mihomoFor(exitName); ok {
+			up, err := socks5Dial(context.Background(), net.JoinHostPort("127.0.0.1", strconv.Itoa(mihomoPort)), domain, port)
 			if err != nil {
 				log.Printf("fakeproxy: mihomo %s dial %s: %v", exitName, domain, err)
 				return

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/huangzheng2016/pvm/internal/daemon"
 	"github.com/huangzheng2016/pvm/internal/exit"
@@ -17,10 +18,24 @@ func exitImport(args []string) int {
 	selectNode := fs.String("select", "", "exit node name (default: first node)")
 	chain := fs.String("chain", "", "comma-separated proxy chain from first hop to exit")
 	args = scanJSONFlag(args)
+	// The name comes first, as documented; flag.Parse stops at the first
+	// positional, so take it off before parsing.
+	name := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		name = args[0]
+		args = args[1:]
+	}
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if fs.NArg() != 1 || *file == "" {
+	if fs.NArg() > 0 {
+		if name != "" || fs.NArg() > 1 {
+			name = ""
+		} else {
+			name = fs.Arg(0)
+		}
+	}
+	if name == "" || *file == "" {
 		return fatalf("usage: pvm exit import <name> --file <config.yaml|-> [--select NODE] [--chain relay,exit]")
 	}
 	var raw []byte
@@ -42,7 +57,7 @@ func exitImport(args []string) int {
 		return fatalf("%v", err)
 	}
 	body := map[string]any{
-		"name":        fs.Arg(0),
+		"name":        name,
 		"content_b64": base64.StdEncoding.EncodeToString(raw),
 		"select":      *selectNode,
 	}

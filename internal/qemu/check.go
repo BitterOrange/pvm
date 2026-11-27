@@ -115,8 +115,12 @@ func Check(b *Build) error {
 	}
 	b.Caps = caps
 	fw := firmwareFile()
-	if fi, err := os.Stat(filepath.Join(b.FirmwareDir, fw)); err != nil || fi.Size() == 0 {
-		return fail(fmt.Sprintf("the firmware %s is not in %s", fw, b.FirmwareDir), next)
+	dirs := []string{b.FirmwareDir}
+	if b.Source == SourceOfficial {
+		dirs = append(dirs, officialFirmwareDirs...)
+	}
+	if !firmwarePresent(dirs, fw) {
+		return fail(fmt.Sprintf("the firmware %s is not in %s", fw, strings.Join(dirs, " or ")), next)
 	}
 	if err := checkEntitlement(b.System); err != nil {
 		return fail(err.Error(), "use brew install qemu or pvm qemu install")
@@ -132,6 +136,15 @@ func errString(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+func firmwarePresent(dirs []string, fw string) bool {
+	for _, d := range dirs {
+		if fi, err := os.Stat(filepath.Join(d, fw)); err == nil && fi.Size() > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func firmwareFile() string {

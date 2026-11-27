@@ -37,13 +37,13 @@ pvm supports only the host's native architecture: darwin/arm64 runs arm64 VMs, l
   - If the status shows `warning: N vm(s) running under tcg fallback`, the host's hardware accelerator is unavailable (on macOS this means Hypervisor.framework is wedged after long uptime — reboot the Mac to restore full speed). VMs work meanwhile, just slowly.
 - On first use, `pvm image list` shows cached base and golden images. `pvm create` can fetch a missing base and build a missing golden; this first run is much slower. Use `pvm image fetch <distro:version>` and `pvm image build <distro:version>` to prepare them explicitly. Fetch rechecks the distribution checksum; `--force` re-downloads. `--keyring /trusted/distribution.gpg` requires `gpgv` and verifies signed checksums with only that explicitly trusted keyring, including cached images.
 - Example exits: `my-exit` (WireGuard over UDP) and `my-exit-tcp` (WireGuard over TCP). Run `pvm exit ls` to see the names configured on the current host and do not re-add an existing name.
-- The `pvm-exit-agent.service` on the VPS must stay running. Never stop it unless you are deliberately testing the kill-switch or upgrading.
+- The `pvm-exit.service` on the VPS (`pvm-exit-agent.service` on older deployments) must stay running. Never stop it unless you are deliberately testing the kill-switch or upgrading.
 
 ## Common choices
 
 - **Images**: `ubuntu:26.04`, `ubuntu:24.04`, `debian:13`, `debian:12`
-- **Exit providers**: pvm exit-agent (`udp` default / `tcp` fallback) or Cloudflare WARP (`udp` only); see `pvm exit add-warp` below
-- **exit-agent NAT backend**: `auto` (probe) / `nft` / `iptables` / `userspace` (no root; ICMP requires ping-socket permission)
+- **Exit providers**: pvm-exit (`udp` default / `tcp` fallback) or Cloudflare WARP (`udp` only); see `pvm exit add-warp` below
+- **pvm-exit NAT backend**: `auto` (probe) / `nft` / `iptables` / `userspace` (no root; ICMP requires ping-socket permission)
 - **Route targets**: `direct` (host egress) or an exit name such as `my-exit`
 - **create flags**: `--image`, `--distro`, `--version`, `--name`, `--user`, `--cpus`, `--mem`, `--disk`, `--tz`, `--locale`, `--git-email`, `--git-name`, `--smbios-spoof`, `--share private|global|none`, `--no-start`, `--no-wait`
 
@@ -114,6 +114,7 @@ pvm exit test my-exit
 - Default-exit domains resolve only through the selected exit (on the VPS or through the WARP tunnel), return real IPv4 addresses, and use direct L3 tunnel forwarding. Only explicit domain proxy rules use fake-ip relays. `pvm exit test` uses the exit-agent's own TCP, UDP, and ICMP probes; WARP is handshake-only. No third-party STUN or probe service is required.
 - TCP, UDP, and ICMP follow the selected exit for both real-IP flows and explicit fake-ip split rules. Only explicit direct/internal rules use the direct path. Unsupported packets and flows with no live tunnel or resolver are dropped; userspace NAT supports TCP, UDP, and ICMP, not arbitrary IP protocols.
 - Direct egress (`--via direct`, direct-domain rules and direct VMs) stays off the host LAN, slirp host loopback (`10.0.2.2`), CGNAT, link-local and reserved ranges. Only explicit `internal` domain rules and explicit `direct --cidr` rules may open private destinations; add a narrow `pvm route add direct --cidr <subnet>` when a VM must reach a LAN service.
+- Exit-routed traffic is held to the same ranges at the gateway, whatever the exit; reaching a private network behind an exit needs `pvm route add proxy --cidr <subnet> --via <exit>` plus `domain_allow_cidr` in that exit server's config.
 
 ### 3. Cluster-wide default route
 
@@ -337,71 +338,56 @@ pvm qemu gc -y                         # remove staging, trash and folders left 
 
 ### Standard flow: deploy an exit over SSH
 
-pvm release binaries are single files from GitHub Releases. Tags publish architecture-specific archives, checksums, and build attestations. Verify provenance before extracting or installing. To deploy a new VPS:
+The VPS runs `pvm-exit`, a server-only binary from the same release (`pvm-exit_linux_amd64.tar.gz`, `pvm-exit_linux_arm64.tar.gz` and a `.deb` for each). `pvm exit deploy` does the whole setup from the host over SSH:
 
 ```bash
-VPS=root@vps.example.com
-TAG=v1.4.0
-ASSET=pvm_linux_amd64.tar.gz   # use pvm_linux_arm64.tar.gz for an arm64 VPS
-REPO=BitterOrange/pvm
-WORK=$(mktemp -d)
-chmod 700 "$WORK"
-trap 'rm -rf "$WORK"' EXIT
-
-# Confirm the target before selecting the artifact.
-ssh "$VPS" 'uname -s; uname -m'
-gh release download "$TAG" --repo "$REPO" --pattern "$ASSET" --pattern SHA256SUMS --dir "$WORK"
-gh attestation verify "$WORK/$ASSET" --repo "$REPO" \
-  --signer-workflow "$REPO/.github/workflows/build.yml" \
-  --source-ref "refs/tags/$TAG" --deny-self-hosted-runners
-(cd "$WORK" && grep "  $ASSET$" SHA256SUMS | shasum -a 256 -c -)
-tar -xzf "$WORK/$ASSET" -C "$WORK"
-
-REMOTE_DIR=$(ssh "$VPS" 'mktemp -d /tmp/pvm-release.XXXXXX')
-scp "$WORK/pvm" "$VPS:$REMOTE_DIR/pvm"
-ssh "$VPS" "set -e; if [ -f /usr/local/bin/pvm ]; then cp /usr/local/bin/pvm /usr/local/bin/pvm.prev; fi; install -m 0755 '$REMOTE_DIR/pvm' /usr/local/bin/pvm.new; mv /usr/local/bin/pvm.new /usr/local/bin/pvm; rm -r '$REMOTE_DIR'"
-
-# Generate a new token only if it does not exist; upgrades preserve it.
-ssh "$VPS" 'set -e
-umask 077
-install -d -m 0700 /etc/pvm-exit
-if [ ! -e /etc/pvm-exit/token ]; then openssl rand -hex 24 > /etc/pvm-exit/token; fi
-test -s /etc/pvm-exit/token
-chmod 0600 /etc/pvm-exit/token
-cat > /etc/systemd/system/pvm-exit-agent.service <<"EOF"
-[Unit]
-Description=pvm exit agent
-After=network-online.target
-Wants=network-online.target
-[Service]
-ExecStart=/usr/local/bin/pvm exit-agent --listen :18443 --token-file /etc/pvm-exit/token
-Restart=always
-RestartSec=5
-[Install]
-WantedBy=multi-user.target
-EOF
-systemctl daemon-reload
-systemctl enable --now pvm-exit-agent'
-
-# Read the initial fingerprint through this authenticated SSH connection.
-# Keep both outputs private. Existing deployments must preserve their pinned fingerprint.
-ssh "$VPS" 'systemctl is-active pvm-exit-agent && journalctl -u pvm-exit-agent --since "-30s" --no-pager | grep fingerprint'
-(umask 077; ssh "$VPS" 'cat /etc/pvm-exit/token' > "$WORK/token")
-pvm exit add my-exit --server vps.example.com:18443 --token-file "$WORK/token" --fingerprint YOUR_CERT_FINGERPRINT
+pvm exit deploy my-exit --ssh root@vps.example.com
 pvm exit test my-exit
 pvm exit test my-exit --speed --samples 5
 ```
 
+What it does:
+- Probes the VPS over SSH (OS, architecture, root, an installed `pvm-exit`).
+- Downloads the `pvm-exit` release matching this pvm, checks its attestation with `gh` and its SHA256 on the host, and uploads it; the VPS needs neither `gh` nor GitHub access. `--tag vX.Y.Z` picks another release; `--binary FILE` uploads a local Linux build.
+- Runs `pvm-exit init` unless it is already set up, which keeps an existing config; after an upload it restarts the service on the new binary.
+- Creates a one-time invite with `pvm-exit invite` and adds the exit with it. SSH has authenticated the VPS, so the fingerprint inside the invite is trusted without a manual check. The invite is never printed.
+
+Options:
+- The whole deploy is one SSH connection, so SSH asks for its password or key passphrase at most once. As a sudo user, the commands run under `sudo`; when sudo needs a password, pvm asks for it once on the host's terminal (three tries) and stops before changing anything if there is no terminal. `--user-mode` installs a systemd user service of the SSH user instead, with userspace NAT and ports from 1024; it stops at logout unless `loginctl enable-linger` is on.
+- `--public-endpoint HOST` when clients reach the VPS by another name than the SSH host. `--client NAME` names this host's token (default: the hostname). `--ssh-opt=-p --ssh-opt=2222` passes SSH arguments.
+- `--migrate` takes over a VPS deployed with `pvm exit-agent install`; see below.
+- A VPS with the `.deb` installed keeps it: deploy only creates the invite, and refuses `--binary` or another `--tag` (upgrade the package instead).
+
+Without SSH from the host, set up the VPS by hand and pass the invite:
+
+```bash
+# on the VPS, one of:
+sudo apt install ./pvm-exit_<version>_amd64.deb                 # starts the service
+sh install-exit.sh --public-endpoint vps.example.com             # scripts/install-exit.sh; as root or as a user
+sudo pvm-exit invite laptop --host vps.example.com --raw         # prints the invite, pvmx1:...
+
+# on the host, paste it on stdin so it stays out of shell history:
+pvm exit add my-exit --invite -
+```
+
+The VPS side:
+- `pvm-exit init [--user]` installs and starts the service; `/etc/pvm-exit/config.yaml` (user mode: `~/.config/pvm-exit/config.yaml`) holds `listen`, `public_endpoint`, `transport`, `nat`, `tun_prefix`, `subnet_base`, `udp_port`, `tcp_port`, `timezone` and `domain_allow_cidr`; unknown keys are rejected. Edit it and run `sudo systemctl restart pvm-exit`.
+- The system service runs as the `pvm-exit` user. Kernel NAT gets `CAP_NET_ADMIN` and `CAP_NET_RAW` only, with forwarding enabled in `/etc/sysctl.d/60-pvm-exit.conf`; userspace NAT runs with no capabilities.
+- `pvm-exit invite <name> [--role enroll|admin] [--ttl 15m] [--max-peers 64]`, `invite ls`, `invite rm <id>`: an invite works once, within its TTL (at most 24h). An enroll token registers peers and sees and removes only its own; an admin token can do everything.
+- `pvm-exit token ls` shows each token with its peers; `pvm-exit token rm <id>` revokes it and removes its peers (`--keep-peers` keeps them). On the host, `pvm exit rm <name>` removes its peer and revokes the host's own enroll token once it has no peer left; an admin token is never revoked this way. `pvm-exit peers` and `pvm-exit info` show the rest.
+- `pvm-exit uninstall [--user]` stops the service and keeps the config, token, certificate and peers.
+
+Migrating a `pvm exit-agent install` deployment: `sudo pvm-exit init --migrate` (or `pvm exit deploy my-exit --ssh ... --migrate` for a new host entry) reads the old unit's flags into a config, keeps the state directory and token file in place, so the fingerprint, token and peers carry over and existing hosts keep working, then stops the old service and renames its unit to `pvm-exit-agent.service.migrated`. Without `--migrate`, `init` refuses to run next to the old service. `pvm exit-agent` stays in v1.4.x and is removed in v1.5.0.
+
 Notes:
-- Roll back a failed deploy: `ssh $VPS 'mv /usr/local/bin/pvm.prev /usr/local/bin/pvm && systemctl restart pvm-exit-agent'`.
-- Existing production exits are already running — do not redeploy a name that is already registered. Upgrade the binary with the same download, install, and service-restart flow without registering the exit again.
+- Existing production exits are already running — do not redeploy a name that is already registered. To upgrade, run `pvm exit deploy` with a new name only when a new host entry is wanted; otherwise upgrade the package, or install the new binary and run `sudo pvm-exit init` again, which keeps the config and restarts the service.
 - Both amd64 and arm64 binaries come from GitHub Releases — no local build needed.
-- Speed probes never touch third-party public servers: the exit-agent serves `/speed?bytes=N` (64MB cap) and `/ping` at `.1:18081` on each tunnel NIC, reachable only inside the tunnel. The gateway uses `/ping` as its data-plane health probe.
-- Registrations idle for 24h are reaped by the exit-agent; a gateway returning after sleep re-enrolls automatically with its persisted peer key.
-- Exit timezone suggestions use the local system timezone, or `--timezone`; no geolocation service is contacted. Private/metadata/local-host destinations are blocked unless explicitly permitted by a narrow `--domain-allow-cidr`. Restart after changing VPS interface addresses.
-- exit-agent NAT backends: `nft` / `iptables` / `userspace`; userspace needs no root and forwards TCP/UDP/ICMP. ICMP uses Linux ping sockets, so insufficient socket permission drops only that ICMP flow and never falls back to another egress.
-- VPS firewall: accept TCP 18443 (`--listen`), UDP 18443 (`--udp-port`) and TCP 18444 (`--tcp-port`). With the `nft`/`iptables` backends, also forward from the agent's TUN devices `pvmexit0` (UDP transport) and `pvmexit1` (TCP transport); the prefix follows `--tun-prefix`. A forward drop outside the agent's table, such as ufw's default `deny (routed)`, cannot be overridden by the agent: `pvm exit test` passes while routed VMs cannot open connections (ping may still work). Fix with `ufw route allow in on pvmexit0 out on <uplink>` and the same for `pvmexit1`.
-- Tunnel pools use separate `/16` networks: UDP `10.<base>.0.0/16`, TCP `10.<base+1>.0.0/16` (default base `99`). Set a different `--subnet-base` for multiple agents on one VPS or to avoid VPS-internal networks. A larger pool does not prevent address conflicts. Changing the layout drops stale registrations; expect tunnels to re-enroll.
+- Speed probes never touch third-party public servers: the exit server serves `/speed?bytes=N` (64MB cap) and `/ping` at `.1:18081` on each tunnel NIC, reachable only inside the tunnel. The gateway uses `/ping` as its data-plane health probe.
+- Registrations idle for 24h are reaped by the exit server; a gateway returning after sleep re-enrolls automatically with its persisted peer key. `pvm exit test` re-enrolls the host entry when the handshake fails, or when the handshake works but the probes get no reply because the server holds the key under another tunnel IP; it saves the corrected entry and retries.
+- Exit timezone suggestions use the server's system timezone, or `timezone` in its config; no geolocation service is contacted. Private/metadata/local-host destinations are blocked unless explicitly permitted by a narrow `domain_allow_cidr`. Restart after changing VPS interface addresses.
+- Exit NAT backends (`nat` in the config): `nft` / `iptables` / `userspace`; userspace needs no root and forwards TCP/UDP/ICMP. ICMP uses Linux ping sockets, so insufficient socket permission drops only that ICMP flow and never falls back to another egress.
+- VPS firewall: accept TCP 18443 (`listen`), UDP 18443 (`udp_port`) and TCP 18444 (`tcp_port`). With the `nft`/`iptables` backends, also forward from the server's TUN devices `pvmexit0` (UDP transport) and `pvmexit1` (TCP transport); the prefix follows `tun_prefix`. A forward drop outside the server's table, such as ufw's default `deny (routed)`, cannot be overridden by the server: `pvm exit test` passes while routed VMs cannot open connections (ping may still work). Fix with `ufw route allow in on pvmexit0 out on <uplink>` and the same for `pvmexit1`.
+- Tunnel pools use separate `/16` networks: UDP `10.<base>.0.0/16`, TCP `10.<base+1>.0.0/16` (default base `99`). Set a different `subnet_base` for multiple exit servers on one VPS or to avoid VPS-internal networks. A larger pool does not prevent address conflicts. Changing the layout drops stale registrations; expect tunnels to re-enroll.
 
 ### Add a Cloudflare WARP exit without a VPS
 

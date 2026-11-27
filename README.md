@@ -194,19 +194,27 @@ Every build must pass version, accelerator, device, test-start and firmware chec
 
 - Images: `ubuntu:26.04`, `ubuntu:24.04`, `debian:13`, `debian:12`.
 - Hosts: macOS arm64, Linux amd64, Windows amd64 (native WHPX or WSL2).
-- VMs use the host's architecture; there is no cross-architecture emulation. Linux arm64 builds are for VPS exit agents only.
+- VMs use the host's architecture; there is no cross-architecture emulation. Linux arm64 builds are for VPS exits only.
 
 ## Deploy an exit on a VPS
 
-Download and verify the release archive for the VPS, create an owner-only token file, then install the exit agent as a systemd service:
+The VPS runs `pvm-exit`, a server-only binary. One command on your host installs it over SSH, starts it and adds the exit:
 
 ```bash
-pvm exit-agent install --listen :18443 --token-file /etc/pvm-exit/token
+pvm exit deploy my-exit --ssh root@vps.example.com
 ```
 
-Register it on your host with `pvm exit add`. [SKILL.md](SKILL.md#standard-flow-deploy-an-exit-over-ssh) has the complete flow over SSH, with fingerprint checks, speed tests and rollback.
+SSH authenticates the VPS, so the certificate fingerprint comes with a one-time invite and no token is copied by hand. With a sudo user the system service is installed; `--user-mode` installs a systemd user service with userspace NAT and no root at all.
 
-The VPS firewall must accept TCP 18443 (control), UDP 18443 (WireGuard over UDP) and TCP 18444 (WireGuard over TCP), and must forward traffic from the agent's `pvmexit0` and `pvmexit1` devices. ufw's default `deny (routed)` blocks that forwarding; allow it, with `eth0` replaced by the internet-facing interface:
+The system service runs as the `pvm-exit` user, with `CAP_NET_ADMIN` and `CAP_NET_RAW` for kernel NAT and no capabilities for userspace NAT. Its settings are in `/etc/pvm-exit/config.yaml`. To set up the VPS yourself instead, use the `.deb` from the release (`sudo apt install ./pvm-exit_<version>_amd64.deb`) or `scripts/install-exit.sh`, then create an invite there:
+
+```bash
+sudo pvm-exit invite laptop        # prints: pvm exit add my-exit --invite pvmx1:...
+```
+
+An invite works once and expires after 15 minutes. It gives the host its own token, which can register peers but not manage the server; `pvm-exit token ls` and `pvm-exit token rm <id>` list and revoke them, and `pvm exit rm` revokes the host's own token once it has no peer left. A VPS running `pvm exit-agent install` moves over with `pvm-exit init --migrate` (or `pvm exit deploy ... --migrate`), keeping its token, fingerprint and peers; `pvm exit-agent` is removed in v1.5.0. [SKILL.md](SKILL.md#standard-flow-deploy-an-exit-over-ssh) has the details.
+
+The VPS firewall must accept TCP 18443 (control), UDP 18443 (WireGuard over UDP) and TCP 18444 (WireGuard over TCP), and must forward traffic from the `pvmexit0` and `pvmexit1` devices. ufw's default `deny (routed)` blocks that forwarding; allow it, with `eth0` replaced by the internet-facing interface:
 
 ```bash
 ufw route allow in on pvmexit0 out on eth0
@@ -225,18 +233,20 @@ Update checks are off by default; set `update_check: true` in `~/.pvm/config.yam
 
 Recent releases (all versions are in [docs/release-notes](docs/release-notes)):
 
-- **v1.4.1** (in progress): upstream v1.3.0-1.3.1 merged, bringing Mihomo exits, `pvm check`, `pvm diag`, `pvm dashboard`, `--json`, `pvm job`, `pvm ssh-config`, `pvm exit-agent install`, `pvm image default`, VMs restarted after a daemon restart, and the clipboard bridge on macOS and Linux.
+- **v1.4.1** (in progress): upstream v1.3.0-1.3.1 merged, bringing Mihomo exits, `pvm check`, `pvm diag`, `pvm dashboard`, `--json`, `pvm job`, `pvm ssh-config`, `pvm-exit` with `pvm exit deploy` and invites, `pvm image default`, VMs restarted after a daemon restart, and the clipboard bridge on macOS and Linux.
 - **v1.4.0**: `pvm qemu`, with pinned pvm-qemu builds or the platform's official QEMU; the gateway boots on M1 Macs.
 - **v1.3.x**: PVM Desktop, the app catalog, the keyring setting, window scale and input methods in `pvm app`.
 
 Next:
 
 - Installers and `install.sh` without QEMU, which `pvm qemu install` then sets up ([plan](docs/design/qemu.md))
+- v1.4.2: Mihomo exits from a subscription link, with manual and automatic updates that never switch the selected node
 - WHPX: AVX in VMs, and a QEMU chosen per VM
 - PVM Desktop: tested from the installers, updating itself, a tray icon, and screens for snapshots, port maps and mounts
 - `pvm desktop` as a host window, like `pvm app`
 - `pvm app` on WSL2
 - Windows CI for the remaining packages, and an installer smoke test
+- v1.5.0: `pvm exit-agent` removed in favour of `pvm-exit`
 
 Details and candidates are in [docs/roadmap.md](docs/roadmap.md).
 

@@ -160,3 +160,29 @@ func TestFakeIPRuleMatchByDomain(t *testing.T) {
 		t.Fatalf("recovered domain should match rule exit: %+v", d)
 	}
 }
+
+// A require-check VM without a lease loses egress like a paused one, and
+// only that VM.
+func TestEgressBlockedCoversPausedAndUnverified(t *testing.T) {
+	e, _, _ := newTestEngine(t)
+	if e.EgressBlocked("dev1") {
+		t.Fatal("a VM with no pause and no require-check is blocked")
+	}
+	e.SetUnverified(map[string]bool{"dev1": true, "dev2": false})
+	if !e.EgressBlocked("dev1") || e.EgressBlocked("dev2") {
+		t.Fatalf("unverified: dev1=%v dev2=%v", e.EgressBlocked("dev1"), e.EgressBlocked("dev2"))
+	}
+	e.SetUnverified(nil)
+	e.SetPaused(map[string]bool{"dev2": true})
+	if e.EgressBlocked("dev1") || !e.EgressBlocked("dev2") {
+		t.Fatalf("paused: dev1=%v dev2=%v", e.EgressBlocked("dev1"), e.EgressBlocked("dev2"))
+	}
+	e.SetPaused(map[string]bool{"*": true})
+	if !e.EgressBlocked("dev1") {
+		t.Fatal("a cluster-wide pause does not block dev1")
+	}
+	var nilEngine *Engine
+	if nilEngine.EgressBlocked("dev1") {
+		t.Fatal("a nil engine blocks")
+	}
+}

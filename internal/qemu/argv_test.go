@@ -178,6 +178,9 @@ func TestAccelArgsAndFallback(t *testing.T) {
 	if !socketBindFailed(errors.New("qemu exited early: exit status 1\n-chardev socket,id=ser0,host=127.0.0.1,port=54659: Failed to bind socket: Input/output error")) {
 		t.Fatal("a socket bind failure would fall back to another accelerator")
 	}
+	if !socketBindFailed(errors.New("qemu exited early: exit status 1\n-netdev user,id=net0,ipv6=off,hostfwd=tcp:127.0.0.1:10022-:22: Could not set up host forwarding rule 'tcp:127.0.0.1:10022-:22'")) {
+		t.Fatal("a busy host forward port would fall back to another accelerator")
+	}
 	if socketBindFailed(errors.New("WHPX: No accelerator found")) {
 		t.Fatal("an accelerator failure counted as a socket bind failure")
 	}

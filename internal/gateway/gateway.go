@@ -1,17 +1,22 @@
 package gateway
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"maps"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/huangzheng2016/pvm/internal/fsutil"
 	gwpolicy "github.com/huangzheng2016/pvm/internal/gw/policy"
 	"github.com/huangzheng2016/pvm/internal/gw/rules"
 )
@@ -33,13 +38,17 @@ type MapEntry struct {
 }
 
 type Config struct {
-	CIDR        string            `json:"cidr"`         // e.g. 100.99.1.0/24
-	GwIP        string            `json:"gw_ip"`        // e.g. 100.99.1.1
-	DNSUpstream string            `json:"dns_upstream"` // slirp address or tcp://resolver:port
-	VMs         []VMEntry         `json:"vms"`
-	Maps        []MapEntry        `json:"maps"`
-	Rules       []rules.Rule      `json:"rules,omitempty"`    // routing rules (fake-ip engine)
-	VMExits     map[string]string `json:"vm_exits,omitempty"` // vm name -> exit name; ""/absent = direct
+	CIDR        string     `json:"cidr"`         // e.g. 100.99.1.0/24
+	GwIP        string     `json:"gw_ip"`        // e.g. 100.99.1.1
+	DNSUpstream string     `json:"dns_upstream"` // slirp address or tcp://resolver:port
+	VMs         []VMEntry  `json:"vms"`
+	Maps        []MapEntry `json:"maps"`
+	// PoolBase and PoolSize give the cluster's map pool ports. Packets to a
+	// pool port without a map are dropped before conntrack.
+	PoolBase int               `json:"pool_base,omitempty"`
+	PoolSize int               `json:"pool_size,omitempty"`
+	Rules    []rules.Rule      `json:"rules,omitempty"`    // routing rules (fake-ip engine)
+	VMExits  map[string]string `json:"vm_exits,omitempty"` // vm name -> exit name; ""/absent = direct
 	// DefaultExit is the cluster-wide fallback when neither a rule nor a
 	// per-VM route matches ("" or absent = direct).
 	DefaultExit string `json:"default_exit,omitempty"`
@@ -97,6 +106,7 @@ func New(configPath string) *Agent {
 			log.Printf("nft private_bypass4 add %s: %v (%s)", cidr, err, strings.TrimSpace(string(out)))
 		}
 	}
+	a.exits.onTunnelServer = addExitServer
 	a.exits.onPrivateEvict = func(cidr string) {
 		if out, err := exec.Command("nft", "delete", "element", "inet", "pvm", "private_bypass4", "{", cidr, "}").CombinedOutput(); err != nil {
 			log.Printf("nft private_bypass4 del %s: %v (%s)", cidr, err, strings.TrimSpace(string(out)))
@@ -130,6 +140,7 @@ func (a *Agent) Run() error {
 		ficmp         *fakeICMP
 		lastCfg       []byte
 		lastReconcile time.Time
+		pol           *gwpolicy.Engine
 	)
 	defer func() {
 		if dhcpSrv != nil {
@@ -184,9 +195,13 @@ func (a *Agent) Run() error {
 			// keeps lastCfg stale so the next tick retries instead of
 			// running a partially applied config forever.
 			applyErr := false
+			firstErr := ""
 			fail := func(step string, err error) {
 				if err != nil {
 					log.Printf("%s: %v", step, err)
+					if !applyErr {
+						firstErr = fmt.Sprintf("%s: %v", step, err)
+					}
 					applyErr = true
 				}
 			}
@@ -249,12 +264,13 @@ func (a *Agent) Run() error {
 				// a rule that flipped direct -> proxy must not keep its
 				// previously learned bypass IPs.
 				a.exits.ReconcileLearned(fdns.Rules())
-				pol := gwpolicy.New(fdns.Rules(), fdns.Pool())
+				pol = gwpolicy.New(fdns.Rules(), fdns.Pool())
 				for name, exit := range c.VMExits {
 					pol.SetVMExit(name, exit)
 				}
 				pol.SetDefaultExit(c.DefaultExit)
 				pol.SetPaused(c.Paused)
+				pol.SetUnverified(a.admission.unverifiedVMs(&c))
 				// DNS follows the same policy as the relays: unmatched
 				// names resolve through the source VM's effective exit.
 				fdns.SetExitHooks(pol, a.vmNameByIP, a.exits.MarkForExit, a.exits.DomainConnectAddr, a.exits.TunnelDNSAddr)
@@ -278,6 +294,9 @@ func (a *Agent) Run() error {
 			if !applyErr {
 				lastCfg = raw
 				lastReconcile = time.Now()
+			}
+			if err := writeApplied(raw, firstErr); err != nil {
+				log.Printf("config applied receipt: %v", err)
 			}
 		}
 		if len(lastCfg) > 0 && time.Since(lastReconcile) >= watchdogPeriod {
@@ -313,8 +332,19 @@ func (a *Agent) Run() error {
 		}
 		if len(lastCfg) > 0 {
 			var c Config
-			if json.Unmarshal(lastCfg, &c) == nil {
-				a.admission.reconcile(&c)
+			if json.Unmarshal(lastCfg, &c) == nil && a.admission.reconcile(&c) && pol != nil {
+				// A lease expired or was granted: nft covers forwarded
+				// traffic, the relays must drop a blocked VM's live flows.
+				pol.SetUnverified(a.admission.unverifiedVMs(&c))
+				if fproxy != nil {
+					fproxy.SetPolicy(pol)
+				}
+				if fudp != nil {
+					fudp.SetPolicy(pol)
+				}
+				if ficmp != nil {
+					ficmp.SetPolicy(pol)
+				}
 			}
 		}
 		a.reconcileLinks()
@@ -325,6 +355,29 @@ func (a *Agent) Run() error {
 		case <-time.After(2 * time.Second):
 		}
 	}
+}
+
+// AppliedPath is where the agent records the digest of the last config it
+// processed and, when a step failed, the first error. The daemon waits for
+// it so a pushed change counts as done only once the gateway enforces it.
+const AppliedPath = "/run/pvm/gateway.applied"
+
+// Applied is the receipt in AppliedPath.
+type Applied struct {
+	SHA256 string `json:"sha256"`
+	Error  string `json:"error,omitempty"`
+}
+
+func writeApplied(raw []byte, applyErr string) error {
+	sum := sha256.Sum256(raw)
+	data, err := json.Marshal(Applied{SHA256: hex.EncodeToString(sum[:]), Error: applyErr})
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(AppliedPath), 0o700); err != nil {
+		return err
+	}
+	return fsutil.AtomicWrite(AppliedPath, data, 0o600)
 }
 
 func (a *Agent) syncExits(c *Config) {

@@ -16,9 +16,10 @@
 
 ## Project Map
 
-`cmd/pvm` 承担 host CLI、daemon 和 VPS exit-agent 角色；guest agent 和 guest 网关分别由独立的 `cmd/agent`、`cmd/gateway` 构建。默认数据根目录为 `~/.pvm/`。
+`cmd/pvm` 承担 host CLI 和 daemon 角色（以及 v1.5.0 删除前的旧 `exit-agent`）；VPS 出口服务器由独立的 `cmd/pvm-exit` 构建，guest agent 和 guest 网关分别由独立的 `cmd/agent`、`cmd/gateway` 构建。默认数据根目录为 `~/.pvm/`。
 
-- `cmd/pvm`: 主程序入口和 CLI usage；`exit-agent` 子命令运行在 VPS。
+- `cmd/pvm`: 主程序入口和 CLI usage；旧的 `exit-agent` 子命令运行在 VPS，v1.4.x 保留、v1.5.0 删除。
+- `cmd/pvm-exit`: VPS 出口服务器，只依赖 `internal/exit`、`internal/exitsvc` 及其网络依赖；发布为 `pvm-exit_linux_<arch>.tar.gz` 和 `script/package-exit-deb.sh` 打出的 `.deb`。
 - `cmd/agent`: 独立 guest 入口，仅提供 agent 服务、当前 VM 的 map 操作和 guest skill。
 - `cmd/gateway`: guest 网关入口，由 daemon 推送的 `/etc/pvm/gateway.json` 驱动。
 - `cmd/assetpack`: 构建期压缩 guest 二进制并生成 embed manifest。
@@ -31,7 +32,8 @@
 - `internal/cluster`: 集群状态、子网/IP/MAC、端口池和路由状态，持久化必须原子写。
 - `internal/gateway`: guest 网关的网桥、DHCP、DNS、NAT、fake-ip 和 fail-closed kill-switch。
 - `internal/gw`: host/guest 共享的 DNS、policy 和 rules 逻辑。
-- `internal/exit`: VPS exit-agent、peer 注册、WireGuard 和 nft/iptables/userspace NAT。
+- `internal/exit`: 出口服务器、peer 注册、分角色 token 和一次性邀请串（`auth.json` 只存哈希）、WireGuard 和 nft/iptables/userspace NAT。
+- `internal/exitsvc`: `pvm-exit` 的命令、`config.yaml`、system/user 两种 systemd unit（非 root 运行）和从 `pvm exit-agent install` 的迁移。
 - `internal/warp`: Cloudflare WARP 设备注册、删除和出口配置转换。
 - `internal/tunnel`: UDP/TCP 两种传输的 WireGuard device 封装。
 - `internal/agent`: guest 内 exec agent 和并发会话。

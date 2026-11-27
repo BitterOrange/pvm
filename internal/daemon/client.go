@@ -8,6 +8,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -375,10 +376,20 @@ func (u *upgradedConn) CloseWrite() error {
 	return u.Conn.Close()
 }
 
+// ErrDaemonOutdated marks a request the running daemon has no route for:
+// an older pvm started it. Handler errors, 404s included, are JSON.
+var ErrDaemonOutdated = errors.New("the running daemon is older than this pvm and lacks this request; restart it: pvm daemon restart")
+
 func decodeResp(resp *http.Response, out any) error {
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
+	}
+	if resp.StatusCode == http.StatusNotFound && strings.TrimSpace(string(data)) == "404 page not found" {
+		if resp.Request != nil && resp.Request.URL != nil {
+			return fmt.Errorf("%s %s: %w", resp.Request.Method, resp.Request.URL.Path, ErrDaemonOutdated)
+		}
+		return ErrDaemonOutdated
 	}
 	if resp.StatusCode >= 400 {
 		var e APIError

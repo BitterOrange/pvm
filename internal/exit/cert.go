@@ -87,3 +87,17 @@ func Fingerprint(rawCert []byte) (string, error) {
 	}
 	return fingerprintDER(rawCert), nil
 }
+
+// StateFingerprint reads the fingerprint of the certificate an agent with
+// state directory dir serves, without creating one.
+func StateFingerprint(dir string) (string, error) {
+	b, err := os.ReadFile(filepath.Join(dir, "server-cert.pem"))
+	if err != nil {
+		return "", err
+	}
+	block, _ := pem.Decode(b)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return "", fmt.Errorf("%s holds no certificate", filepath.Join(dir, "server-cert.pem"))
+	}
+	return Fingerprint(block.Bytes)
+}

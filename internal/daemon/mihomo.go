@@ -155,7 +155,10 @@ Wants=network-online.target
 Type=simple
 DynamicUser=yes
 StateDirectory=pvm-mihomo-%s
-ExecStart=/usr/local/bin/pvm-mihomo -d /var/lib/pvm-mihomo-%s -f /etc/pvm/mihomo/%s.yaml
+# The config holds node credentials and stays root-only; systemd hands
+# the dynamic user a private copy under %%d.
+LoadCredential=config:/etc/pvm/mihomo/%s.yaml
+ExecStart=/usr/local/bin/pvm-mihomo -d /var/lib/pvm-mihomo-%s -f %%d/config
 Restart=always
 RestartSec=3
 NoNewPrivileges=yes
@@ -180,9 +183,17 @@ WantedBy=multi-user.target
 		unitB64, name, name, name)
 	out, err := s.sshRun(gw, installCmd)
 	if err != nil {
-		return fmt.Errorf("install mihomo service: %v\n%s", err, strings.TrimSpace(out))
+		// A unit left behind would restart-loop on the gateway.
+		if cout, cerr := s.sshRun(gw, mihomoUninstallCmd(name)); cerr != nil {
+			return fmt.Errorf("install mihomo service: %v\n%s\nremoving it from the gateway also failed: %v\n%s", err, strings.TrimSpace(out), cerr, strings.TrimSpace(cout))
+		}
+		return fmt.Errorf("install mihomo service (removed it from the gateway again): %v\n%s", err, strings.TrimSpace(out))
 	}
 	return s.pushGatewayConfig(cl.ID)
+}
+
+func mihomoUninstallCmd(name string) string {
+	return fmt.Sprintf("sudo systemctl disable --now pvm-mihomo-%s.service; sudo rm -f /etc/systemd/system/pvm-mihomo-%s.service /etc/pvm/mihomo/%s.yaml && sudo systemctl daemon-reload", name, name, name)
 }
 
 func (s *Server) handleMihomoNodes(w http.ResponseWriter, r *http.Request) {
@@ -216,7 +227,7 @@ func (s *Server) handleMihomoRemove(w http.ResponseWriter, r *http.Request) {
 	}
 	if cl := s.Clusters.Get(1); cl != nil {
 		if gw, err := s.getSpec(cl.Gateway); err == nil {
-			_, _ = s.sshRun(gw, fmt.Sprintf("sudo systemctl disable --now pvm-mihomo-%s.service; sudo rm -f /etc/systemd/system/pvm-mihomo-%s.service /etc/pvm/mihomo/%s.yaml; sudo systemctl daemon-reload", name, name, name))
+			_, _ = s.sshRun(gw, mihomoUninstallCmd(name))
 		}
 	}
 	_ = os.Remove(mihomoSourcePath(s.P.Home, name))

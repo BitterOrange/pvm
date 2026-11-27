@@ -261,8 +261,9 @@ func firstLine(s string) string {
 }
 
 // socketBindFailed reports a QEMU that could not listen on one of its
-// sockets. Another accelerator fails the same way, so it is no reason
-// to fall back.
+// sockets, its chardevs or a user-network host forward. Another
+// accelerator fails the same way, so it is no reason to fall back.
 func socketBindFailed(err error) bool {
-	return strings.Contains(err.Error(), "Failed to bind socket")
+	msg := err.Error()
+	return strings.Contains(msg, "Failed to bind socket") || strings.Contains(msg, "Could not set up host forwarding rule")
 }

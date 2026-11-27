@@ -7,7 +7,7 @@ import urllib.parse
 import urllib.request
 
 RAW_ARTIFACTS = {"raw-pvm_linux_amd64", "raw-pvm_linux_arm64", "raw-pvm_darwin_arm64", "raw-pvm_windows_amd64",
-                 "raw-pvm-desktop_windows_amd64"}
+                 "raw-pvm-desktop_windows_amd64", "raw-pvm-exit_linux_amd64", "raw-pvm-exit_linux_arm64"}
 
 
 def trusted_run(run, repository, sha, workflow_id):

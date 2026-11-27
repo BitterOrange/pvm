@@ -150,7 +150,7 @@ func (p *fakeUDP) SetPolicy(eng *gwpolicy.Engine) {
 	p.policy = eng
 	for key, flow := range p.flows {
 		dec := eng.DecideFlow(flow.domain, net.ParseIP(key.dstIP), flow.vm)
-		if dec.Route != flow.route || dec.Exit != flow.exit {
+		if dec.Route != flow.route || dec.Exit != flow.exit || eng.EgressBlocked(flow.vm) {
 			delete(p.flows, key)
 			flow.close()
 		}
@@ -271,7 +271,7 @@ func (p *fakeUDP) openFlow(key fakeUDPKey, src, dst *net.UDPAddr, domain string,
 	var flow *fakeUDPFlow
 	if !p.closed && p.policy != nil {
 		dec := p.policy.DecideFlow(domain, dst.IP, vmName)
-		if dec.Route == route && dec.Exit == exitName && (route != gwpolicy.Proxy || p.markFor(exitName) >= 0) {
+		if dec.Route == route && dec.Exit == exitName && !p.policy.EgressBlocked(vmName) && (route != gwpolicy.Proxy || p.markFor(exitName) >= 0) {
 			flow = &fakeUDPFlow{key: key, src: src, dst: dst, domain: domain, vm: vmName, route: route, exit: exitName, up: up, down: down, lastActive: time.Now()}
 			p.flows[key] = flow
 			p.wg.Add(1)
@@ -296,8 +296,8 @@ func (p *fakeUDP) dial(domain string, dst *net.UDPAddr, vmName string) (*net.UDP
 	if pol == nil {
 		return nil, gwpolicy.Direct, "", fmt.Errorf("policy is not ready")
 	}
-	if pol.IsPaused(vmName) {
-		return nil, gwpolicy.Direct, "", fmt.Errorf("egress is paused for %s", vmName)
+	if pol.EgressBlocked(vmName) {
+		return nil, gwpolicy.Direct, "", fmt.Errorf("egress is blocked for %s (paused or unverified)", vmName)
 	}
 	dec := pol.DecideFlow(domain, dst.IP, vmName)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

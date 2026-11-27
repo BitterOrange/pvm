@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -49,10 +50,10 @@ func (s *Server) applyRegionProfile(spec *vm.Spec, via string) string {
 		// timedated caches the pre-cloud-init zone for the whole boot,
 		// so read /etc/localtime instead of timedatectl, with an
 		// /etc/timezone fallback.
-		curTZ, err1 := s.sshRun(spec, `z=$(readlink /etc/localtime 2>/dev/null); z=${z##*/zoneinfo/}; if [ -z "$z" ] && [ -f /etc/timezone ]; then z=$(cat /etc/timezone); fi; echo "$z"`)
-		curLocale, err2 := s.sshRun(spec, `grep -E '^(export )?LANG=' /etc/default/locale /etc/profile.d/pvm-locale.sh 2>/dev/null | tail -1 | sed 's/^export //' | cut -d= -f2`)
-		if err1 != nil || err2 != nil {
-			return fmt.Sprintf("region profile for %q pending (vm unreachable via ssh): tz=%s locale=%s", via, tz, locale)
+		curTZ, err1 := s.regionSSH(spec, `z=$(readlink /etc/localtime 2>/dev/null); z=${z##*/zoneinfo/}; if [ -z "$z" ] && [ -f /etc/timezone ]; then z=$(cat /etc/timezone); fi; echo "$z"`)
+		curLocale, err2 := s.regionSSH(spec, `grep -E '^(export )?LANG=' /etc/default/locale /etc/profile.d/pvm-locale.sh 2>/dev/null | tail -1 | sed 's/^export //' | cut -d= -f2`)
+		if err := errors.Join(err1, err2); err != nil {
+			return fmt.Sprintf("region profile for %q pending (vm unreachable via ssh: %v): tz=%s locale=%s", via, err, tz, locale)
 		}
 		tz0 := strings.TrimSpace(curTZ)
 		if tz0 == "" {
@@ -169,11 +170,35 @@ func (s *Server) setGuestRegion(spec *vm.Spec, tz, locale string) string {
 		fmt.Sprintf("grep -q '^LANG=' /etc/environment && sudo sed -i 's/^LANG=.*/LANG=%s/' /etc/environment || echo 'LANG=%s' | sudo tee -a /etc/environment", locale, locale),
 	}
 	for _, c := range cmds {
-		if out, err := s.sshRun(spec, c); err != nil {
+		if out, err := s.regionSSH(spec, c); err != nil {
 			return fmt.Sprintf("region apply failed at %q: %v (%s)", c, err, strings.TrimSpace(out))
 		}
 	}
 	return fmt.Sprintf("region applied: tz=%s locale=%s", tz, locale)
+}
+
+// regionSSHTimeout bounds each region command including its retries.
+var regionSSHTimeout = 2 * time.Minute
+
+// regionSSH retries transient ssh failures: a route switch applies the
+// region right after the restart, while cloud-init and the agent install
+// can still bounce sshd.
+func (s *Server) regionSSH(spec *vm.Spec, cmd string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), regionSSHTimeout)
+	defer cancel()
+	var out string
+	err := retryTransientSSH(ctx, func() error {
+		var err error
+		out, err = s.sshRunCtx(ctx, spec, cmd)
+		return err
+	})
+	return out, err
+}
+
+// regionRetryable reports a region note left by an ssh failure, which a
+// later start can still fix; invalid values would fail the same way again.
+func regionRetryable(note string) bool {
+	return strings.HasPrefix(note, "region profile for ") || strings.HasPrefix(note, "region apply failed")
 }
 
 // Guest-provided timezone strings must be validated before embedding them in shell commands.

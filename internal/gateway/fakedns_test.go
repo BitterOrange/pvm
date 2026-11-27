@@ -232,3 +232,25 @@ func TestFakeDNSProbeTunnelDownFails(t *testing.T) {
 		t.Fatal("probe with the agent tunnel down must fail, not fake-fallback")
 	}
 }
+
+// A Mihomo exit has no tunnel resolver: names resolve to a fake IP so the
+// relay hands them to Mihomo, while a down Mihomo still fails closed.
+func TestResolveThroughMihomoExitIsFake(t *testing.T) {
+	f := &fakeDNS{
+		markFor:    func(string) int { return mihomoMark },
+		dcAddrFor:  func(string) (string, bool) { return "", false },
+		dnsAddrFor: func(string) (string, bool) { return "", false },
+	}
+	lookup := func(context.Context, string, string, int, string, string) (net.IP, error) {
+		t.Fatal("a Mihomo exit must not resolve through a tunnel")
+		return nil, nil
+	}
+	ip, mode, err := f.resolveThroughExit(context.Background(), "example.com", "my-exit", lookup)
+	if err != nil || ip != nil || mode != gwdns.ExitResolveFake {
+		t.Fatalf("got %v, %v, %v; want a fake answer", ip, mode, err)
+	}
+	f.markFor = func(string) int { return -1 }
+	if _, _, err := f.resolveThroughExit(context.Background(), "example.com", "my-exit", lookup); err == nil {
+		t.Fatal("a down Mihomo exit resolved")
+	}
+}

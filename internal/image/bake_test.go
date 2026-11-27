@@ -1,11 +1,13 @@
 package image
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/huangzheng2016/pvm/internal/qemu"
 )
@@ -53,5 +55,22 @@ func TestSSHRunnerKeepalive(t *testing.T) {
 	args := strings.Join((&sshRunner{key: "k", port: 10022, user: "baker"}).args("true"), " ")
 	if !strings.Contains(args, "ServerAliveInterval=") || !strings.Contains(args, "ServerAliveCountMax=") {
 		t.Errorf("bake ssh has no keepalive: %s", args)
+	}
+}
+
+// The cold boot reuses the build VM's ssh forward port, so it must wait
+// until the old listener is gone and give up on one that stays.
+func TestWaitTCPPortFree(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	if err := waitTCPPortFree(port, 300*time.Millisecond); err == nil {
+		t.Fatal("a held port was reported free")
+	}
+	time.AfterFunc(300*time.Millisecond, func() { l.Close() })
+	if err := waitTCPPortFree(port, 5*time.Second); err != nil {
+		t.Fatalf("released port: %v", err)
 	}
 }

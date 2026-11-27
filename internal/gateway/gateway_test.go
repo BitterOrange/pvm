@@ -5,6 +5,8 @@ import (
 	"net"
 	"strings"
 	"testing"
+
+	"github.com/huangzheng2016/pvm/internal/gw/rules"
 )
 
 func discoverPacket(xid uint32, mac string) []byte {
@@ -277,5 +279,72 @@ func TestRoutingConfigEqual(t *testing.T) {
 	exitChanged.DefaultExit = "my-exit"
 	if routingConfigEqual(base, &exitChanged) {
 		t.Fatal("default exit change must report routingConfigEqual = false")
+	}
+}
+
+// Host forwards to an unmapped pool port are dropped before conntrack, and
+// mapped ports pass; without a pool the guard is absent.
+func TestRenderNFTPoolGuard(t *testing.T) {
+	cfg := &Config{
+		CIDR: "192.168.1.0/24", GwIP: "192.168.1.1",
+		Maps: []MapEntry{
+			{HostPort: 30000, VMIP: "192.168.1.10", GuestPort: 80, Proto: "tcp"},
+			{HostPort: 30053, VMIP: "192.168.1.11", GuestPort: 53, Proto: "udp"},
+			{HostPort: 30054, VMIP: "192.168.1.11", GuestPort: 54, Proto: "udp"},
+		},
+		PoolBase: 30000, PoolSize: 100,
+	}
+	out := RenderNFT(cfg, "enp0s1", "br0", nil, nil)
+	for _, want := range []string{
+		"type filter hook prerouting priority raw; policy accept;",
+		`iifname "enp0s1" ip saddr 10.0.2.2 tcp dport { 30000 } accept`,
+		`iifname "enp0s1" ip saddr 10.0.2.2 udp dport { 30053, 30054 } accept`,
+		`iifname "enp0s1" ip saddr 10.0.2.2 meta l4proto { tcp, udp } th dport 30000-30099 drop`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("ruleset missing %q\n%s", want, out)
+		}
+	}
+	cfg.Maps = nil
+	out = RenderNFT(cfg, "enp0s1", "br0", nil, nil)
+	if strings.Contains(out, "dport {") {
+		t.Errorf("an empty map list rendered an accept set\n%s", out)
+	}
+	cfg.PoolSize = 0
+	if out := RenderNFT(cfg, "enp0s1", "br0", nil, nil); strings.Contains(out, "pool_guard") {
+		t.Errorf("a config without a pool rendered the guard\n%s", out)
+	}
+}
+
+// Exit-bound traffic gets the metadata and private-range drop too, after
+// the paused/unverified drops, with in-tunnel exit servers and explicit
+// proxy CIDRs exempt.
+func TestRenderNFTExitBoundPrivateDrop(t *testing.T) {
+	cfg := &Config{
+		CIDR: "100.99.1.0/24", GwIP: "100.99.1.1",
+		VMs:   []VMEntry{{Name: "dev1", IP: "100.99.1.10"}},
+		Exits: map[string]ExitDef{"my-exit": {Server: "vps.example.com"}},
+		Rules: []rules.Rule{
+			{Type: rules.CIDR, Pattern: "10.8.0.0/16", Action: rules.Proxy, Exit: "my-exit"},
+			{Type: rules.CIDR, Pattern: "192.168.50.0/24", Action: rules.Direct},
+		},
+	}
+	out := RenderNFT(cfg, "enp0s1", "br0", nil, nil)
+	exitBound := `iifname "br0" oifname != { "br0", "enp0s1" }`
+	unverified := strings.Index(out, `ip saddr @unverified4 oifname != "br0" drop`)
+	servers := strings.Index(out, exitBound+` ip daddr @exit_servers4 accept`)
+	proxy := strings.Index(out, exitBound+` ip daddr @proxy_cidr4 accept`)
+	meta := strings.Index(out, exitBound+` ip daddr 169.254.0.0/16 counter name pvm_drop_meta drop`)
+	private := strings.Index(out, exitBound+` ip daddr @blocked_direct4 counter name pvm_drop_private drop`)
+	if unverified < 0 || servers < 0 || proxy < 0 || meta < 0 || private < 0 {
+		t.Fatalf("missing exit-bound rules:\n%s", out)
+	}
+	if !(unverified < servers && servers < proxy && proxy < meta && meta < private) {
+		t.Fatalf("unexpected exit-bound rule order:\n%s", out)
+	}
+	set := out[strings.Index(out, "set proxy_cidr4"):]
+	set = set[:strings.Index(set, "}")]
+	if !strings.Contains(set, "10.8.0.0/16") || strings.Contains(set, "192.168.50.0/24") {
+		t.Fatalf("proxy_cidr4 must hold only proxy-rule CIDRs:\n%s", set)
 	}
 }

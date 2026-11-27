@@ -402,7 +402,7 @@ func BuildMihomoConfig(src *Source, selected string, chain []string, socksPort i
 		"socks-port":          socksPort,
 		"bind-address":        "127.0.0.1",
 		"allow-lan":           false,
-		"mode":                "rules",
+		"mode":                "rule",
 		"log-level":           "warning",
 		"ipv6":                false,
 		"external-controller": "",

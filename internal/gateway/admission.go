@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -50,13 +51,17 @@ func GrantLease(c *Config, vmName string, seconds int) error {
 }
 
 type admissionState struct {
-	mu       sync.Mutex
-	lastRaw  []byte
-	grants   map[string]time.Time
-	admitted map[string]bool // VM name -> currently allowed past unverified4
+	mu         sync.Mutex
+	lastRaw    []byte
+	grants     map[string]time.Time
+	admitted   map[string]bool // VM name -> currently allowed past unverified4
+	unverified map[string]bool // VM name -> require-check without a valid lease, as last reported
 }
 
-func (s *admissionState) reconcile(c *Config) {
+// reconcile updates the nft admission sets from the leases and reports
+// whether the set of unverified VMs changed, so the caller can apply it to
+// the relays, which nft does not cover.
+func (s *admissionState) reconcile(c *Config) bool {
 	now := time.Now()
 	if raw, err := os.ReadFile(grantsPath); err == nil && string(raw) != string(s.lastRaw) {
 		var g map[string]time.Time
@@ -70,6 +75,9 @@ func (s *admissionState) reconcile(c *Config) {
 	if s.admitted == nil {
 		s.admitted = map[string]bool{}
 	}
+	unverified := s.unverifiedLocked(c, now)
+	changed := !maps.Equal(unverified, s.unverified)
+	s.unverified = unverified
 	for _, v := range c.VMs {
 		want := !c.RequireCheck[v.Name] || now.Before(s.grants[v.Name])
 		cur, known := s.admitted[v.Name]
@@ -92,12 +100,29 @@ func (s *admissionState) reconcile(c *Config) {
 			continue
 		}
 		if c.RequireCheck[v.Name] {
-			// Cut established external connections immediately on revoke so
-			// long-lived flows cannot outlive their lease.
-			_ = exec.Command("conntrack", "-D", "-s", v.IP).Run()
 			log.Printf("admission: %s verified=%v", v.Name, want)
 		}
 	}
+	return changed
+}
+
+// unverifiedVMs returns the require-check VMs without a valid lease. Before
+// the first reconcile no lease is known, so every require-check VM counts
+// as unverified.
+func (s *admissionState) unverifiedVMs(c *Config) map[string]bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.unverifiedLocked(c, time.Now())
+}
+
+func (s *admissionState) unverifiedLocked(c *Config, now time.Time) map[string]bool {
+	out := map[string]bool{}
+	for _, v := range c.VMs {
+		if c.RequireCheck[v.Name] && !now.Before(s.grants[v.Name]) {
+			out[v.Name] = true
+		}
+	}
+	return out
 }
 
 // AdmittedVMIPs renders the current admission sets for full nft rebuilds.

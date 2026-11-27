@@ -274,9 +274,10 @@ type vmRouteOps struct {
 	start   func() error
 	setExit func(via string) error
 	push    func() error
-	// gatewayRunning and deferRegion are used only for a stopped VM.
+	// gatewayRunning is used only for a stopped VM.
 	gatewayRunning func() (bool, error)
-	// deferRegion leaves the exit's timezone/locale to the next start.
+	// deferRegion leaves the exit's timezone/locale to the next start: for
+	// a stopped VM, or after the restarted VM's ssh kept failing.
 	deferRegion func() error
 }
 
@@ -379,6 +380,13 @@ func (s *Server) switchVMRoute(spec *vm.Spec, via, previousExit string, ops vmRo
 		res.note = s.applyRegionProfile(spec, via)
 	} else {
 		res.note = s.restoreRegion(spec)
+	}
+	if regionRetryable(res.note) {
+		if err := ops.deferRegion(); err != nil {
+			res.note += fmt.Sprintf("; marking it for the next start also failed: %v", err)
+		} else {
+			res.note += fmt.Sprintf("; retried when %s next starts", spec.Name)
+		}
 	}
 	return res, nil
 }

@@ -22,7 +22,6 @@ type GoldenEntry struct {
 	BaseDigest   string    `json:"base_digest"`
 	BuiltAt      time.Time `json:"built_at"`
 	Packages     []string  `json:"packages"`
-	DockerImages []string  `json:"docker_images"`
 	// KernelArgs were in the build VM's grub when it was sealed, so clones
 	// boot with them from the first boot.
 	KernelArgs string `json:"kernel_args,omitempty"`
