@@ -49,6 +49,10 @@ func TestParseClashSanitizesAndBuildsChain(t *testing.T) {
 	if !strings.Contains(text, "dialer-proxy: pvm-hop-0") || !strings.Contains(text, "allow-lan: false") || !strings.Contains(text, "socks-port: 17890") {
 		t.Fatalf("unexpected Mihomo config:\n%s", text)
 	}
+	// Mihomo refuses to start on any other spelling ("rules" is invalid).
+	if doc["mode"] != "rule" {
+		t.Fatalf("mode = %v, want rule", doc["mode"])
+	}
 }
 
 func TestParseShareLinks(t *testing.T) {

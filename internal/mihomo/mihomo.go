@@ -23,11 +23,10 @@ type Asset struct {
 	SHA256 string // of the .gz archive
 }
 
+// pinned is keyed by asset name. On amd64 only the compatible build is
+// used: Mihomo runs in the gateway VM, whose CPU may lack AVX (WHPX guests
+// run without XSAVE), and the default amd64 build needs x86-64-v3.
 var pinned = map[string]Asset{
-	"amd64": {
-		URL:    "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.34/mihomo-linux-amd64-v1.19.34.gz",
-		SHA256: "223fab877e5795ce780ba39902e5f0b1113c1256ae244a7160f1165e017e9ccc",
-	},
 	"amd64-compatible": {
 		URL:    "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.34/mihomo-linux-amd64-compatible-v1.19.34.gz",
 		SHA256: "2763f5b414527f7baf6dc57e3f82f3ab561eedf34bfd7c2f2cde1f7e592efe06",
@@ -42,11 +41,18 @@ const licenseNotice = "Mihomo is free software licensed under the GNU General Pu
 
 var httpClient = &http.Client{Timeout: 5 * time.Minute}
 
-func BinaryName(arch string) string { return "mihomo-linux-" + arch }
+func BinaryName(arch string) string { return "mihomo-linux-" + assetName(arch) }
+
+func assetName(arch string) string {
+	if arch == "amd64" {
+		return "amd64-compatible"
+	}
+	return arch
+}
 
 // EnsureBinary returns a verified local Mihomo binary for the target Linux arch.
 func EnsureBinary(runtimeDir, arch string, progress io.Writer) (string, error) {
-	asset, ok := pinned[arch]
+	asset, ok := pinned[assetName(arch)]
 	if !ok {
 		return "", fmt.Errorf("unsupported Mihomo arch %q", arch)
 	}
