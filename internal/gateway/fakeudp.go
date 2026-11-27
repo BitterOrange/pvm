@@ -296,6 +296,9 @@ func (p *fakeUDP) dial(domain string, dst *net.UDPAddr, vmName string) (*net.UDP
 	if pol == nil {
 		return nil, gwpolicy.Direct, "", fmt.Errorf("policy is not ready")
 	}
+	if pol.IsPaused(vmName) {
+		return nil, gwpolicy.Direct, "", fmt.Errorf("egress is paused for %s", vmName)
+	}
 	dec := pol.DecideFlow(domain, dst.IP, vmName)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -306,6 +309,9 @@ func (p *fakeUDP) dial(domain string, dst *net.UDPAddr, vmName string) (*net.UDP
 		}
 		ip, err := lookup(ctx, domain)
 		if err != nil {
+			return nil, dec.Route, dec.Exit, err
+		}
+		if err := checkDirectTarget(pol, domain, ip); err != nil {
 			return nil, dec.Route, dec.Exit, err
 		}
 		up, err := net.DialUDP("udp4", nil, &net.UDPAddr{IP: ip, Port: dst.Port})

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -32,12 +33,13 @@ type proxyAdmission struct {
 }
 
 type fakeProxy struct {
-	policy     *gwpolicy.Engine
-	resolver   *net.Resolver
-	vmByIP     func(ip net.IP) string               // config lookup, nil-safe
-	markFor    func(exitName string) int            // SO_MARK selecting the exit's table; -1 = no tunnel
-	dcAddrFor  func(exitName string) (string, bool) // in-tunnel domain-connect addr
-	dnsAddrFor func(exitName string) (string, bool) // in-tunnel resolver for exits without domain-connect
+	policy        *gwpolicy.Engine
+	resolver      *net.Resolver
+	vmByIP        func(ip net.IP) string               // config lookup, nil-safe
+	markFor       func(exitName string) int            // SO_MARK selecting the exit's table; -1 = no tunnel
+	dcAddrFor     func(exitName string) (string, bool) // in-tunnel domain-connect addr
+	dnsAddrFor    func(exitName string) (string, bool) // in-tunnel resolver for exits without domain-connect
+	mihomoPortFor func(exitName string) (int, bool)
 
 	mu           sync.Mutex
 	ln           *net.TCPListener
@@ -85,7 +87,7 @@ func (p *fakeProxy) SetPolicy(eng *gwpolicy.Engine) {
 	var kill []*trackedConn
 	for tc := range p.conns {
 		dec := eng.DecideFlow(tc.domain, nil, tc.vm)
-		if dec.Route != tc.route || dec.Exit != tc.exit {
+		if dec.Route != tc.route || dec.Exit != tc.exit || eng.IsPaused(tc.vm) {
 			kill = append(kill, tc)
 		}
 	}
@@ -105,6 +107,12 @@ func (p *fakeProxy) curPolicy() *gwpolicy.Engine {
 // SetExitHooks installs the tunnel lookup hooks on config reload, then
 // resets proxied flows whose exit tunnel is now down: the flow is dead
 // anyway, so the VM gets an immediate RST instead of a hanging relay.
+func (p *fakeProxy) SetMihomoHook(fn func(string) (int, bool)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.mihomoPortFor = fn
+}
+
 func (p *fakeProxy) SetExitHooks(markFor func(string) int, dcAddrFor, dnsAddrFor func(string) (string, bool)) {
 	p.mu.Lock()
 	p.markFor, p.dcAddrFor, p.dnsAddrFor = markFor, dcAddrFor, dnsAddrFor
@@ -277,11 +285,19 @@ func (p *fakeProxy) dialDirect(src *net.TCPConn, domain string, port int, vmName
 		log.Printf("fakeproxy: reserved probe has no direct target")
 		return
 	}
+	if p.curPolicy().IsPaused(vmName) {
+		log.Printf("fakeproxy: %s egress is paused; refusing %s", vmName, domain)
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	ips, err := p.resolver.LookupIP(ctx, "ip4", domain)
 	cancel()
 	if err != nil || len(ips) == 0 {
 		log.Printf("fakeproxy: resolve %s: %v", domain, err)
+		return
+	}
+	if err := checkDirectTarget(p.curPolicy(), domain, ips[0]); err != nil {
+		log.Printf("fakeproxy: %v", err)
 		return
 	}
 	up, err := net.DialTimeout("tcp4", net.JoinHostPort(ips[0].String(), fmt.Sprint(port)), 10*time.Second)
@@ -299,6 +315,30 @@ func (p *fakeProxy) dialDirect(src *net.TCPConn, domain string, port int, vmName
 }
 
 func (p *fakeProxy) dialProxy(src *net.TCPConn, domain string, port int, exitName string, vmName string) {
+	if p.curPolicy().IsPaused(vmName) {
+		log.Printf("fakeproxy: %s egress is paused; refusing %s", vmName, domain)
+		return
+	}
+	p.mu.Lock()
+	mihomoFor := p.mihomoPortFor
+	p.mu.Unlock()
+	if mihomoFor != nil {
+		if port, ok := mihomoFor(exitName); ok {
+			up, err := socks5Dial(context.Background(), net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), domain, port)
+			if err != nil {
+				log.Printf("fakeproxy: mihomo %s dial %s: %v", exitName, domain, err)
+				return
+			}
+			defer up.Close()
+			tc := &trackedConn{vm: vmName, domain: domain, route: gwpolicy.Proxy, exit: exitName, src: src, up: up}
+			if !p.track(tc) {
+				return
+			}
+			defer p.untrack(tc)
+			relay(src, up)
+			return
+		}
+	}
 	markFor, dcAddrFor, dnsAddrFor := p.exitHooks()
 	mark := markFor(exitName)
 	if mark < 0 {

@@ -24,23 +24,26 @@ import (
 	"github.com/huangzheng2016/pvm/internal/exit"
 	"github.com/huangzheng2016/pvm/internal/fsutil"
 	"github.com/huangzheng2016/pvm/internal/gw/rules"
+	"github.com/huangzheng2016/pvm/internal/netcheck"
 	"github.com/huangzheng2016/pvm/internal/tunnel"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun"
 )
 
 type ExitDef struct {
-	Provider     string `json:"provider,omitempty"`
-	Server       string `json:"server"`
-	Token        string `json:"token"`
-	Transport    string `json:"transport"`
-	Fingerprint  string `json:"fingerprint"`
-	WGPrivateKey string `json:"wg_private_key,omitempty"`
-	ServerPubKey string `json:"server_pubkey,omitempty"`
-	TunnelIP     string `json:"tunnel_ip,omitempty"`
-	MTU          int    `json:"mtu,omitempty"`
-	Endpoint     string `json:"endpoint,omitempty"`
-	DNS          string `json:"dns,omitempty"`
+	Provider     string               `json:"provider,omitempty"`
+	Server       string               `json:"server"`
+	Token        string               `json:"token"`
+	Transport    string               `json:"transport"`
+	Fingerprint  string               `json:"fingerprint"`
+	WGPrivateKey string               `json:"wg_private_key,omitempty"`
+	ServerPubKey string               `json:"server_pubkey,omitempty"`
+	TunnelIP     string               `json:"tunnel_ip,omitempty"`
+	MTU          int                  `json:"mtu,omitempty"`
+	Endpoint     string               `json:"endpoint,omitempty"`
+	DNS          string               `json:"dns,omitempty"`
+	MihomoPort   int                  `json:"mihomo_port,omitempty"`
+	Policy       *netcheck.ExitPolicy `json:"policy,omitempty"`
 }
 
 const (
@@ -134,6 +137,9 @@ type exitTunnel struct {
 	// response (domain-connect/speed target); it cannot be derived from
 	// tunIP because the tunnel subnet is a /16.
 	serverTunIP string
+
+	policyBlocked   bool
+	lastPolicyCheck time.Time
 }
 
 // lastHandshake reports the newest peer handshake time (unix seconds).
@@ -160,13 +166,16 @@ type exitManager struct {
 	mu   sync.Mutex
 	tuns map[string]*exitTunnel
 	// desired ip-rule state (reconciled on Sync)
-	vmRules      map[string]int  // vmIP -> exit idx
-	vmDirect     map[string]bool // vmIP -> lookup main (cluster-default override)
-	cidrRules    map[string]int  // proxied cidr -> exit idx
-	cluster      string          // cluster cidr with a default exit, "" = none
-	clusterTable string          // its lookup table, re-added on index drift
-	clusterLocal string          // cluster cidr pinned to main (replies, vm-to-vm)
-	bypass       map[string]bool // direct cidrs/ips -> lookup main
+	vmRules       map[string]int  // vmIP -> exit idx
+	vmDirect      map[string]bool // vmIP -> lookup main (cluster-default override)
+	cidrRules     map[string]int  // proxied cidr -> exit idx
+	cluster       string          // cluster cidr with a default exit, "" = none
+	clusterTable  string          // its lookup table, re-added on index drift
+	clusterLocal  string          // cluster cidr pinned to main (replies, vm-to-vm)
+	bypass        map[string]bool // direct cidrs/ips -> lookup main
+	privateBypass map[string]bool // explicit private cidrs/ips allowed past blocked_direct4
+	mihomoPorts   map[string]int
+	mihomoUp      map[string]bool
 	// learned holds runtime-learned bypass /32s indexed by the domain
 	// that produced them (domain -> ip -> last seen). Entries survive
 	// config syncs so cached direct flows are never rerouted mid-TTL,
@@ -177,8 +186,10 @@ type exitManager struct {
 	learnedFullOnce sync.Once
 	// onBypass/onEvict fire when a bypass ip is learned/expired at
 	// runtime, so the nft bypass set stays in sync between full rebuilds.
-	onBypass func(ip string)
-	onEvict  func(ip string)
+	onBypass        func(ip string)
+	onEvict         func(ip string)
+	onPrivateBypass func(ip string)
+	onPrivateEvict  func(ip string)
 }
 
 const (
@@ -188,13 +199,16 @@ const (
 
 func newExitManager() *exitManager {
 	return &exitManager{
-		tuns:       map[string]*exitTunnel{},
-		vmRules:    map[string]int{},
-		vmDirect:   map[string]bool{},
-		cidrRules:  map[string]int{},
-		bypass:     map[string]bool{},
-		learned:    map[string]map[string]time.Time{},
-		learnedTTL: defaultLearnedTTL,
+		tuns:          map[string]*exitTunnel{},
+		vmRules:       map[string]int{},
+		vmDirect:      map[string]bool{},
+		cidrRules:     map[string]int{},
+		bypass:        map[string]bool{},
+		privateBypass: map[string]bool{},
+		mihomoPorts:   map[string]int{},
+		mihomoUp:      map[string]bool{},
+		learned:       map[string]map[string]time.Time{},
+		learnedTTL:    defaultLearnedTTL,
 	}
 }
 
@@ -210,14 +224,29 @@ func (m *exitManager) Sync(exits map[string]ExitDef, vmExits map[string]string, 
 		names = append(names, n)
 	}
 
+	wantMihomo := map[string]int{}
+	for name, def := range exits {
+		if def.Provider == "mihomo" && def.MihomoPort > 0 {
+			wantMihomo[name] = def.MihomoPort
+		}
+	}
+	m.mihomoPorts = wantMihomo
+	for name := range m.mihomoUp {
+		if wantMihomo[name] == 0 {
+			delete(m.mihomoUp, name)
+		}
+	}
 	// tear down tunnels no longer referenced
 	for name, t := range m.tuns {
-		if _, ok := exits[name]; !ok {
+		if def, ok := exits[name]; !ok || def.Provider == "mihomo" {
 			m.teardownLocked(t, true)
 		}
 	}
 	// ensure tunnels
 	for name, def := range exits {
+		if def.Provider == "mihomo" {
+			continue
+		}
 		if idx := exitIndex(names, name); idx >= 0 {
 			m.ensureLocked(name, def, idx)
 		}
@@ -268,16 +297,35 @@ func (m *exitManager) Sync(exits map[string]ExitDef, vmExits map[string]string, 
 	// into the tunnel and every port map breaks the moment the VM gets
 	// an exit.
 	wantBypass["10.0.2.0/24"] = true
+	wantPrivate := map[string]bool{}
 	for _, c := range directCIDRs {
+		if isBlockedDirectCIDR(c) {
+			wantPrivate[c] = true
+		}
 		wantBypass[c] = true
 	}
 	// runtime-learned bypass IPs survive config syncs; dropping them
-	// mid-TTL reroutes cached direct flows into the tunnel.
+	// mid-TTL reroutes cached direct flows into the tunnel. Private IPs
+	// only ever enter learned through explicit internal rules.
 	for _, ips := range m.learned {
 		for ip := range ips {
+			if isBlockedDirectCIDR(ip) {
+				wantPrivate[ip] = true
+			}
 			wantBypass[ip] = true
 		}
 	}
+	for cidr := range m.privateBypass {
+		if !wantPrivate[cidr] && m.onPrivateEvict != nil {
+			m.onPrivateEvict(cidr)
+		}
+	}
+	for cidr := range wantPrivate {
+		if !m.privateBypass[cidr] && m.onPrivateBypass != nil {
+			m.onPrivateBypass(cidr)
+		}
+	}
+	m.privateBypass = wantPrivate
 
 	m.reconcileRulesLocked(wantVM, wantCIDR, wantBypass)
 	m.reconcileDefaultLocked(wantDirect, wantCluster, defIdx, vmIPs)
@@ -310,12 +358,16 @@ func (m *exitManager) Sync(exits map[string]ExitDef, vmExits map[string]string, 
 // a last-seen timestamp (for TTL expiry); both are refreshed on every
 // hit. The table is capped and new entries are dropped (fail-safe to
 // the tunnel) once full.
-func (m *exitManager) AddBypassIP(domain, ip string) {
+func (m *exitManager) AddBypassIP(domain, ip string, allowPrivate bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := time.Now()
 	ips := m.learned[domain]
 	cidr := ip + "/32"
+	private := isBlockedDirectCIDR(cidr)
+	if private && !allowPrivate {
+		return
+	}
 	if _, dup := ips[cidr]; dup {
 		ips[cidr] = now
 		return
@@ -340,7 +392,18 @@ func (m *exitManager) AddBypassIP(domain, ip string) {
 		if m.onBypass != nil {
 			m.onBypass(cidr)
 		}
+		if private {
+			m.privateBypass[cidr] = true
+			if m.onPrivateBypass != nil {
+				m.onPrivateBypass(cidr)
+			}
+		}
 	}
+}
+
+func isBlockedDirectCIDR(cidr string) bool {
+	ip, _, err := net.ParseCIDR(cidr)
+	return err != nil || exit.IsBlockedEgressIP(ip)
 }
 
 // evictLearnedIP removes one learned /32 everywhere: ip rule, state,
@@ -354,6 +417,12 @@ func (m *exitManager) evictLearnedIPLocked(domain, cidr string) {
 	delete(m.bypass, cidr)
 	if m.onEvict != nil {
 		m.onEvict(cidr)
+	}
+	if m.privateBypass[cidr] {
+		delete(m.privateBypass, cidr)
+		if m.onPrivateEvict != nil {
+			m.onPrivateEvict(cidr)
+		}
 	}
 }
 
@@ -398,6 +467,19 @@ func (m *exitManager) BypassList() []string {
 	defer m.mu.Unlock()
 	out := make([]string, 0, len(m.bypass))
 	for cidr := range m.bypass {
+		out = append(out, cidr)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// PrivateBypassList snapshots the private/reserved destinations explicitly
+// permitted past blocked_direct4.
+func (m *exitManager) PrivateBypassList() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, 0, len(m.privateBypass))
+	for cidr := range m.privateBypass {
 		out = append(out, cidr)
 	}
 	sort.Strings(out)
@@ -665,8 +747,11 @@ persistent_keepalive_interval=25
 	// Only locally originated, unmarked outer transport packets bypass policy.
 	// Forwarded VM traffic and marked relays to the same address keep their exit.
 	if server != "" {
-		ipRuleCmd("del", "to", server+"/32", "iif", "lo", "fwmark", "0", "lookup", "main")
-		if err := ipRuleCmd("add", "to", server+"/32", "iif", "lo", "fwmark", "0", "lookup", "main", "pref", strconv.Itoa(rulePrefEndpoint)); err != nil {
+		// An explicit all-bits mask is required: bare "fwmark 0" installs an
+		// unscoped rule in iproute2, matching marked relays and never matching
+		// the drift check.
+		ipRuleCmd("del", "to", server+"/32", "iif", "lo", "fwmark", "0/0xffffffff", "lookup", "main")
+		if err := ipRuleCmd("add", "to", server+"/32", "iif", "lo", "fwmark", "0/0xffffffff", "lookup", "main", "pref", strconv.Itoa(rulePrefEndpoint)); err != nil {
 			log.Printf("exit %s: endpoint host rule: %v", t.name, err)
 		}
 	}
@@ -720,7 +805,7 @@ func (m *exitManager) ensureTunnelRoute(t *exitTunnel) error {
 		return err
 	}
 	if t.server != "" {
-		if err := ipRuleCmd("add", "to", t.server+"/32", "iif", "lo", "fwmark", "0", "lookup", "main", "pref", strconv.Itoa(rulePrefEndpoint)); err != nil {
+		if err := ipRuleCmd("add", "to", t.server+"/32", "iif", "lo", "fwmark", "0/0xffffffff", "lookup", "main", "pref", strconv.Itoa(rulePrefEndpoint)); err != nil {
 			log.Printf("exit %s: endpoint host rule: %v", t.name, err)
 		}
 	}
@@ -828,6 +913,7 @@ func (m *exitManager) cleanupDevice(t *exitTunnel) {
 	// drop the anti-loop host rule too; leaving it pins a stale VPS IP
 	// to the main table after the tunnel is gone.
 	if t.server != "" {
+		ipRuleCmd("del", "to", t.server+"/32", "iif", "lo", "fwmark", "0/0xffffffff", "lookup", "main")
 		ipRuleCmd("del", "to", t.server+"/32", "iif", "lo", "fwmark", "0", "lookup", "main")
 	}
 	if dev != nil {
@@ -848,16 +934,71 @@ func (m *exitManager) CloseAll() {
 func (m *exitManager) MarkForExit(name string) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if port := m.mihomoPorts[name]; port > 0 {
+		if m.mihomoUp[name] {
+			return 0 // loopback dial to gateway-local Mihomo; no tunnel mark
+		}
+		return -1
+	}
 	t, ok := m.tuns[name]
 	if !ok {
 		return -1
 	}
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	if t.dev == nil {
+	if t.dev == nil || t.policyBlocked {
 		return -1
 	}
 	return fwMarkBase + t.idx
+}
+
+var probeExitFunc = ProbeExit
+
+// checkExitPolicies samples exits that carry a drift baseline at most once
+// per minute. A violation fails the exit closed via MarkForExit and reports
+// changed=true so the agent resets live relay connections immediately.
+func (m *exitManager) checkExitPolicies(c *Config) bool {
+	m.mu.Lock()
+	var check []*exitTunnel
+	now := time.Now()
+	for _, t := range m.tuns {
+		t.mu.RLock()
+		if t.dev != nil && t.def.Policy != nil && now.Sub(t.lastPolicyCheck) >= time.Minute {
+			t.mu.RUnlock()
+			t.mu.Lock()
+			t.lastPolicyCheck = now
+			t.mu.Unlock()
+			check = append(check, t)
+		} else {
+			t.mu.RUnlock()
+		}
+	}
+	m.mu.Unlock()
+	changed := false
+	for _, t := range check {
+		t.mu.RLock()
+		pol := t.def.Policy
+		name := t.name
+		was := t.policyBlocked
+		t.mu.RUnlock()
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		res, err := probeExitFunc(ctx, c, name, true)
+		if err == nil {
+			err = pol.Evaluate(res.IP, res.Geo)
+		}
+		cancel()
+		blocked := err != nil
+		if blocked {
+			log.Printf("exit %s: policy violation, failing closed: %v", name, err)
+		}
+		t.mu.Lock()
+		t.policyBlocked = blocked
+		t.mu.Unlock()
+		if was != blocked {
+			changed = true
+		}
+	}
+	return changed
 }
 
 // DomainConnectAddr returns the in-tunnel domain-connect address for an
@@ -980,10 +1121,21 @@ func normRuleCIDR(s string, prefixLen ...*int) string {
 // normRuleFwmark canonicalizes a mark as printed by iproute2 (hex) so it
 // compares equal to the decimal form used in rule commands.
 func normRuleFwmark(s string) string {
-	if v, err := strconv.ParseUint(s, 0, 32); err == nil {
-		return fmt.Sprintf("0x%x", v)
+	mark, mask, hasMask := strings.Cut(s, "/")
+	v, err := strconv.ParseUint(mark, 0, 32)
+	if err != nil {
+		return s
 	}
-	return s
+	if hasMask {
+		m, err := strconv.ParseUint(mask, 0, 32)
+		if err != nil || m == 0 {
+			return s
+		}
+		if m != 0xffffffff {
+			return fmt.Sprintf("0x%x/0x%x", v, m)
+		}
+	}
+	return fmt.Sprintf("0x%x", v)
 }
 
 func (r policyRule) ruleArgs(verb, table string) []string {
@@ -1044,7 +1196,7 @@ func (m *exitManager) desiredPolicyRulesLocked() []policyRule {
 		table := strconv.Itoa(ruleTableBase + t.idx)
 		out = append(out, newPolicyRule([]string{"fwmark", strconv.Itoa(fwMarkBase + t.idx)}, table, rulePrefFwmark))
 		if server != "" {
-			out = append(out, newPolicyRule([]string{"to", server + "/32", "iif", "lo", "fwmark", "0"}, "main", rulePrefEndpoint))
+			out = append(out, newPolicyRule([]string{"to", server + "/32", "iif", "lo", "fwmark", "0/0xffffffff"}, "main", rulePrefEndpoint))
 		}
 	}
 	return out
@@ -1076,10 +1228,15 @@ func (m *exitManager) reconcileActualRulesLocked() {
 	for _, e := range entries {
 		dst := normRuleCIDR(e.Dst, e.DstLen)
 		oldEndpoint := e.Priority == rulePrefEndpoint || (e.Priority == rulePrefBypass && !m.bypass[dst])
-		if endpoints[dst] && oldEndpoint && e.Table == "main" && (e.Src == "" || e.Src == "all") && e.IIF == "" && e.Fwmark == "" {
+		if endpoints[dst] && oldEndpoint && e.Table == "main" && (e.Src == "" || e.Src == "all") && (e.IIF == "" || e.IIF == "lo") && e.Fwmark == "" {
 			// A zero mask selects the unmarked rule, excluding the replacement
 			// fwmark=0 rule whose mask is all bits.
-			if err := ipRuleCmd("del", "to", dst, "fwmark", "0/0", "lookup", "main", "pref", strconv.Itoa(e.Priority)); err != nil {
+			del := []string{"del", "to", dst}
+			if e.IIF == "lo" {
+				del = append(del, "iif", "lo")
+			}
+			del = append(del, "fwmark", "0/0", "lookup", "main", "pref", strconv.Itoa(e.Priority))
+			if err := ipRuleCmd(del...); err != nil {
 				log.Printf("exit: remove unscoped endpoint rule: %v", err)
 			} else {
 				continue

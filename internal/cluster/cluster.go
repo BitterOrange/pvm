@@ -40,6 +40,8 @@ type PortMap struct {
 	PoolPort  int    `json:"pool_port"` // gateway slirp hostfwd + DNAT
 	GuestPort int    `json:"guest_port"`
 	Proto     string `json:"proto"`
+	// Transport is "stream" when carried over pvm.stream (no gateway PoolPort).
+	Transport string `json:"transport,omitempty"`
 }
 
 type Cluster struct {
@@ -58,6 +60,12 @@ type Cluster struct {
 	// DefaultExit is the cluster-wide fallback route used when neither a
 	// rule nor a per-VM exit matches ("" = direct).
 	DefaultExit string `json:"default_exit,omitempty"`
+	// Paused blocks external egress for a VM name, or "*" for the cluster,
+	// while keeping SSH, mounts, cluster-local links and host port maps alive.
+	Paused map[string]bool `json:"paused,omitempty"`
+	// RequireCheck keeps a VM offline until the host daemon renews a 90s
+	// verification lease from a passing `pvm check` report.
+	RequireCheck map[string]bool `json:"require_check,omitempty"`
 }
 
 type Store struct {
@@ -181,6 +189,18 @@ func (c *Cluster) deepCopy() *Cluster {
 	for k, v := range c.VMExits {
 		out.VMExits[k] = v
 	}
+	if c.Paused != nil {
+		out.Paused = make(map[string]bool, len(c.Paused))
+		for k, v := range c.Paused {
+			out.Paused[k] = v
+		}
+	}
+	if c.RequireCheck != nil {
+		out.RequireCheck = make(map[string]bool, len(c.RequireCheck))
+		for k, v := range c.RequireCheck {
+			out.RequireCheck[k] = v
+		}
+	}
 	return &out
 }
 
@@ -212,7 +232,7 @@ func (s *Store) LinkSock(id int, vmName string) string {
 // RefreshLinkSock picks a new port for a VM's link when the stored one
 // can no longer be bound; see paths.RefreshSocketEndpoint. The gateway
 // listens on it, so call it only before the gateway starts.
-func (s *Store) RefreshLinkSock(id int, vmName string) bool {
+func (s *Store) RefreshLinkSock(id int, vmName string) (bool, error) {
 	return paths.RefreshSocketEndpoint(filepath.Join(s.LinksDir(id), vmName+".sock"))
 }
 
@@ -313,6 +333,27 @@ func (s *Store) AddMap(id int, vmName, vmIP string, hostPort, guestPort int, pro
 		return nil, fmt.Errorf("cluster %d port pool exhausted", id)
 	}
 	m := &PortMap{VM: vmName, VMIP: vmIP, HostPort: hostPort, PoolPort: pool, GuestPort: guestPort, Proto: proto}
+	c.Maps = append(c.Maps, m)
+	out := *m
+	return &out, s.saveCluster(id, previous)
+}
+
+// AddStreamMap records a TCP port map carried over pvm.stream, which uses no
+// gateway PoolPort or slirp socket.
+func (s *Store) AddStreamMap(id int, vmName, vmIP string, hostPort, guestPort int) (*PortMap, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c := s.data.Clusters[id]
+	if c == nil {
+		return nil, fmt.Errorf("cluster %d does not exist", id)
+	}
+	previous := c.deepCopy()
+	for _, m := range c.Maps {
+		if m.HostPort == hostPort && m.Proto == "tcp" {
+			return nil, fmt.Errorf("host port %d/tcp already mapped", hostPort)
+		}
+	}
+	m := &PortMap{VM: vmName, VMIP: vmIP, HostPort: hostPort, GuestPort: guestPort, Proto: "tcp", Transport: "stream"}
 	c.Maps = append(c.Maps, m)
 	out := *m
 	return &out, s.saveCluster(id, previous)

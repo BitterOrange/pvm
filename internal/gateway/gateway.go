@@ -45,7 +45,9 @@ type Config struct {
 	DefaultExit string `json:"default_exit,omitempty"`
 	// Exits carries the connection defs for every exit referenced by
 	// Rules or VMExits (keyed by exit name).
-	Exits map[string]ExitDef `json:"exits,omitempty"`
+	Exits        map[string]ExitDef `json:"exits,omitempty"`
+	Paused       map[string]bool    `json:"paused,omitempty"`
+	RequireCheck map[string]bool    `json:"require_check,omitempty"`
 }
 
 func routingConfigEqual(a, b *Config) bool {
@@ -59,18 +61,20 @@ func routingConfigEqual(a, b *Config) bool {
 		slices.Equal(a.VMs, b.VMs) &&
 		slices.Equal(a.Rules, b.Rules) &&
 		maps.Equal(a.VMExits, b.VMExits) &&
+		maps.Equal(a.Paused, b.Paused) &&
 		maps.EqualFunc(a.Exits, b.Exits, sameExitPeer)
 }
 
 type Agent struct {
 	configPath string
 
-	mu    sync.Mutex
-	cfg   *Config
-	upl   string // uplink interface name, e.g. enp0s1
-	br    string
-	exits *exitManager
-	stop  chan struct{}
+	mu        sync.Mutex
+	cfg       *Config
+	upl       string // uplink interface name, e.g. enp0s1
+	br        string
+	exits     *exitManager
+	admission admissionState
+	stop      chan struct{}
 }
 
 func New(configPath string) *Agent {
@@ -88,11 +92,25 @@ func New(configPath string) *Agent {
 			log.Printf("nft bypass4 del %s: %v (%s)", cidr, err, strings.TrimSpace(string(out)))
 		}
 	}
+	a.exits.onPrivateBypass = func(cidr string) {
+		if out, err := exec.Command("nft", "add", "element", "inet", "pvm", "private_bypass4", "{", cidr, "}").CombinedOutput(); err != nil {
+			log.Printf("nft private_bypass4 add %s: %v (%s)", cidr, err, strings.TrimSpace(string(out)))
+		}
+	}
+	a.exits.onPrivateEvict = func(cidr string) {
+		if out, err := exec.Command("nft", "delete", "element", "inet", "pvm", "private_bypass4", "{", cidr, "}").CombinedOutput(); err != nil {
+			log.Printf("nft private_bypass4 del %s: %v (%s)", cidr, err, strings.TrimSpace(string(out)))
+		}
+	}
 	return a
 }
 
 func (a *Agent) loadConfig() (*Config, error) {
-	data, err := os.ReadFile(a.configPath)
+	return LoadConfig(a.configPath)
+}
+
+func LoadConfig(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -183,9 +201,9 @@ func (a *Agent) Run() error {
 				dhcpSrv.UpdateMap(a.macIPMap())
 			}
 			if fdns == nil && c.DNSUpstream != "" {
-				f, err := newFakeDNS(c.DNSUpstream, func(domain string, ips []string) {
+				f, err := newFakeDNS(c.DNSUpstream, func(domain string, ips []string, allowPrivate bool) {
 					for _, ip := range ips {
-						a.exits.AddBypassIP(domain, ip)
+						a.exits.AddBypassIP(domain, ip, allowPrivate)
 					}
 				})
 				if err != nil {
@@ -236,12 +254,14 @@ func (a *Agent) Run() error {
 					pol.SetVMExit(name, exit)
 				}
 				pol.SetDefaultExit(c.DefaultExit)
+				pol.SetPaused(c.Paused)
 				// DNS follows the same policy as the relays: unmatched
 				// names resolve through the source VM's effective exit.
 				fdns.SetExitHooks(pol, a.vmNameByIP, a.exits.MarkForExit, a.exits.DomainConnectAddr, a.exits.TunnelDNSAddr)
 				if fproxy != nil {
 					fproxy.SetPolicy(pol)
 					fproxy.SetExitHooks(a.exits.MarkForExit, a.exits.DomainConnectAddr, a.exits.TunnelDNSAddr)
+					fproxy.SetMihomoHook(a.exits.MihomoPortFor)
 				}
 				if fudp != nil {
 					fudp.SetPolicy(pol)
@@ -267,6 +287,18 @@ func (a *Agent) Run() error {
 				lastReconcile = time.Now()
 			} else {
 				a.syncExits(&c)
+				mihomoChanged := a.exits.probeMihomo()
+				if a.exits.checkExitPolicies(&c) || mihomoChanged {
+					if fproxy != nil {
+						fproxy.SetExitHooks(a.exits.MarkForExit, a.exits.DomainConnectAddr, a.exits.TunnelDNSAddr)
+					}
+					if fudp != nil {
+						fudp.SetExitHooks(a.exits.MarkForExit, a.exits.DomainConnectAddr, a.exits.TunnelDNSAddr)
+					}
+					if ficmp != nil {
+						ficmp.SetExitHooks(a.exits.MarkForExit, a.exits.DomainConnectAddr, a.exits.TunnelDNSAddr)
+					}
+				}
 				if err := a.checkNFT(&c); err != nil {
 					log.Printf("network drift: %v; reapplying", err)
 					if err := a.applyNetwork(&c); err != nil {
@@ -277,6 +309,12 @@ func (a *Agent) Run() error {
 				} else {
 					lastReconcile = time.Now()
 				}
+			}
+		}
+		if len(lastCfg) > 0 {
+			var c Config
+			if json.Unmarshal(lastCfg, &c) == nil {
+				a.admission.reconcile(&c)
 			}
 		}
 		a.reconcileLinks()

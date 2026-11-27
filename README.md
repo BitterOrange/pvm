@@ -6,54 +6,14 @@ Personal QEMU dev VMs in a single binary: create an isolated Linux development m
 
 ## Highlights
 
-- **A ready dev box in one command.** Docker, common tools, Firefox and a desktop come preinstalled. After a one-time image bake, new VMs are ready in about 30 seconds. See [Quickstart](#quickstart).
-- **All traffic through your own exit, and none without it.** Route a VM through your VPS over WireGuard, or through Cloudflare WARP with nothing to deploy. If the tunnel drops, the VM goes offline instead of leaking your host's IP. See [Fail-closed exit routing](#fail-closed-exit-routing).
-- **Split routing by domain or network.** Send some domains direct or through another exit; rules apply at once, without a restart.
-- **VM programs as native windows.** `pvm app dev1 -- gedit` or a web page opens as its own window on your desktop, while cookies, fingerprint and egress stay in the VM. Type with your own input method. See [Apps as host windows](#apps-as-host-windows).
-- **The full desktop in a browser tab.** `pvm desktop` opens the VM's own desktop, the same machine you reach over SSH. See [Browser desktop](#browser-desktop).
-- **Your project folders in the VM.** Mount a folder, keep two synced copies, or upload once and download the result. In a project folder, `pvm ssh` opens a shell in the same folder in its VM, and offers to start the VM first. See [Workspaces](#workspaces).
-- **Snapshots in seconds** (not on native Windows, where QEMU cannot migrate WHPX VMs) **and clones**, loopback port maps, and a read-only `pvm audit` of routing and DNS.
-- **Windows without administrator rights.** One installer brings pvm, the PVM Desktop app, QEMU and the Xpra client. See [Windows installers](#windows-installers) and [PVM Desktop](#pvm-desktop).
-
-## Roadmap
-
-Shipped:
-
-- [x] Per-user Windows installers; workspaces (`mount`, `sync`, `copy`); Firefox and sshfs in golden images (v1.1.6-1.1.7)
-- [x] `pvm app` (VM programs and web pages as host windows), the `pvm.stream` channel and a faster `pvm desktop`, UDP exits on native Windows, the Xpra client in the installers (v1.2.0)
-- [x] The current workspace's VM by default; `pvm app` with host window frames, sound, file clipboard, emoji and fonts for all scripts; Windows unit tests in CI (v1.2.1-1.2.2)
-- [x] PVM Desktop on native Windows, a stored default VM, the app catalog with `pvm app install`; upstream merged (v1.3.0-1.3.1)
-- [x] vCPUs and memory in `pvm resize` and PVM Desktop, stopping the daemon from PVM Desktop, installed apps found in the VM, Firefox in the catalog (v1.3.2-1.3.3)
-- [x] Renderer CPUs for Chromium apps; input method text through ibus, with candidates at the text cursor on Windows; less CPU for sound, silence not sent, and a microphone that follows headsets (v1.3.4)
-- [x] The keyring as a setting, `off` or `host` (encrypted, unlocked from the host); window scale per VM; app settings that apply to open windows at once; no focus ring after clicks in Electron apps (v1.3.5)
-- [x] PVM Desktop: terminal, app and file manager on a stopped VM ask to start it first and open once it is ready; app settings in groups, all in view (v1.3.6)
-- [x] `pvm qemu`: pvm-qemu builds pinned by digest or the platform's official QEMU, a daemon that runs without QEMU, the PVM Desktop QEMU page; the gateway boots on M1 Macs (v1.4.0)
-
-Planned:
-
-- [ ] The full name: Proxied Virtual Machine (PVM), to be agreed upstream
-- [ ] QEMU outside the installers, step two: installers without QEMU and an `install.sh` that runs `pvm qemu install` (v1.4.1; [plan](docs/design/qemu.md))
-- [ ] WHPX: AVX in VMs, and a QEMU chosen per VM (a pvm-qemu build or the platform's official one)
-- [ ] `pvm app`: host-to-guest clipboard on macOS and Linux, WSL2, and input method text in programs without ibus
-- [ ] `pvm desktop` as a host window like `pvm app`, opening the workspace folder in the VM's file manager
-- [ ] PVM Desktop: the installer test on Windows, keeping the workspace form when its VM is stopped, "Create PVM workspace" in the Explorer menu, a tray icon, and screens for snapshots, port maps and mounts
-- [ ] PVM Desktop updates itself: it downloads, verifies and runs the installer that matches how it was installed, and can run `pvm upgrade` for the local pvm
-- [ ] `pvm exit-agent install|uninstall` as a systemd service
-- [ ] M1 Macs: a gateway that boots within the 15 PCI buses HVF allows there
-- [ ] No RAM snapshots under WHPX, refused up front with the reason
-- [ ] Windows CI: the remaining packages' tests, and an installer smoke test on tags
-
-Candidates:
-
-- [ ] `pvm ssh-config` for VS Code Remote-SSH, rsync and similar tools
-- [ ] An egress probe in `pvm exit test`
-- [ ] A default image
-- [ ] Port maps over `pvm.stream` instead of the gateway VM
-- [ ] Exit lists with failover, keeping the kill-switch fail-closed
-- [ ] Fix the gateway rule drift false positive
-- [ ] WHPX end-to-end tests on a self-hosted runner
-
-Details are in [docs/roadmap.md](docs/roadmap.md).
+- **A dev box in one command.** Docker, common tools, Firefox and a desktop come preinstalled. After a one-time image bake, a new VM is ready in about 30 seconds.
+- **Traffic leaves only through your exit.** Route a VM through your VPS over WireGuard, Cloudflare WARP, or an imported Clash/Mihomo/Surge node. If the tunnel drops, the VM goes offline instead of using your host's connection.
+- **Split routing.** Send chosen domains or networks direct or through another exit; rules apply at once.
+- **Checks you can run.** `pvm check dev1` measures the real exit IP on the VM's path, and `pvm route require-check` keeps a VM offline until a check passes.
+- **VM programs as host windows.** `pvm app dev1 -- gedit` opens one program as its own window on your desktop; its cookies, fingerprint and traffic stay in the VM.
+- **Your project folders in the VM.** Mount a folder, keep two synced copies, or upload once and download the result.
+- **Made for scripts and agents.** `--json` output, `pvm capabilities`, `pvm job` and a read-only `pvm dashboard`.
+- **Windows without administrator rights.** One installer brings pvm, the PVM Desktop app, QEMU and the Xpra client.
 
 ## Installation
 
@@ -61,37 +21,41 @@ pvm runs on macOS on arm64, Linux on amd64, and Windows on amd64.
 
 ### Windows
 
-1. Download `pvm_windows_amd64_setup.exe` or `pvm_windows_amd64_setup.msi` from [Releases](../../releases). Optionally verify it first: `gh attestation verify pvm_windows_amd64_setup.exe --repo BitterOrange/pvm`.
+1. Download `pvm_windows_amd64_setup.exe` or `pvm_windows_amd64_setup.msi` from [Releases](../../releases). To verify it first: `gh attestation verify pvm_windows_amd64_setup.exe --repo BitterOrange/pvm`.
 2. Run it. No administrator rights are needed.
-3. Open a new terminal, so the `PATH` change applies, and run `pvm doctor` to check acceleration and the backend. Or open **PVM Desktop** from the Start menu; see [PVM Desktop](#pvm-desktop).
+3. Open a new terminal and run `pvm doctor`, or open **PVM Desktop** from the Start menu.
 
-Both installers put `pvm.exe` and `pvm-desktop.exe` in `%LOCALAPPDATA%\pvm`, add that folder to the user `PATH`, add a "PVM Desktop" shortcut to your Start menu, install the Xpra client to `%LOCALAPPDATA%\pvm\xpra`, and place the pinned [pvm-qemu build](#qemu) under `%USERPROFILE%\.pvm\runtime\qemu` (or under `PVM_HOME` when it is set), which pvm takes over into `runtime\qemu\builds` the first time its daemon starts. Use one installer type per machine. `pvm upgrade` updates only `pvm.exe`; it changes neither QEMU nor `pvm-desktop.exe`, so run the new installer to update the app. Uninstalling keeps the QEMU builds under `runtime\qemu\builds` together with your VMs.
+Both installers put `pvm.exe` and `pvm-desktop.exe` in `%LOCALAPPDATA%\pvm`, add that folder to the user `PATH`, add a Start menu shortcut, install the Xpra client, and place the pinned [pvm-qemu build](#qemu) in your pvm data folder (`%USERPROFILE%\.pvm`, or `PVM_HOME`).
 
-- The last page of the `.exe` installer offers "Open PVM Desktop", off by default. The MSI has no such page.
-- Files in use by a running pvm, VM or PVM Desktop cannot be replaced. Interactive runs offer to close PVM Desktop and stop the daemon, which also stops running VMs; silent runs (`/S`, `msiexec /qn`) refuse, so close PVM Desktop and run `pvm daemon stop` first.
-- Stay with the installer you started with: the `.exe` refuses to run over an MSI install and the MSI over an `.exe` install. To switch, uninstall in Settings > Apps first; your VMs are kept.
-- Silent MSI install: `msiexec /i pvm_windows_amd64_setup.msi /qn`. Pass `PVMHOME=D:\pvm-home` to choose the data location; upgrades and uninstalls reuse it.
-- Uninstalling from Settings > Apps removes pvm, PVM Desktop with its Start menu shortcut and its "open at login" entry, the runtime, the Xpra client and the `PATH` entry. VM disks, keys and configuration under `~/.pvm` are kept.
+- Stay with the installer type you started with; each refuses to run over the other. To switch, uninstall in Settings > Apps first.
+- `pvm upgrade` updates only `pvm.exe`. Run the new installer to update PVM Desktop.
+- Uninstalling keeps your VMs, keys, configuration and QEMU builds under `~/.pvm`.
 
 <details>
-<summary>Known limitations of the Windows installers</summary>
+<summary>More about the Windows installers</summary>
 
-- Installing, and uninstalling from Settings > Apps, are tested while pvm is stopped. The prompt that offers to stop a running daemon has not been tested end to end. If it does not appear, or setup still reports that pvm is running, cancel, run `pvm daemon stop`, and run setup again.
-- Stopping the daemon from setup waits for running VMs to shut down, up to about three minutes, and setup shows no progress meanwhile.
-- VMs left running without a daemon cannot be stopped by setup. Setup lists them and refuses; shut them down, then run setup again.
-- Antivirus software briefly locks freshly unpacked files. Setup retries each file move for up to 10 seconds; if the lock lasts longer, setup stops and keeps the previous version. Run setup again.
-- After `pvm upgrade`, Settings > Apps still shows the version the installer put there, and PVM Desktop stays at that version.
-- The PVM Desktop parts of the installers (the shortcut, closing a running app, and removing its entries on uninstall) have been built but not yet run on Windows.
+- Files in use cannot be replaced. Interactive runs offer to close PVM Desktop and stop the daemon, which also stops running VMs; silent runs (`/S`, `msiexec /qn`) refuse, so close PVM Desktop and run `pvm daemon stop` first.
+- Silent MSI install: `msiexec /i pvm_windows_amd64_setup.msi /qn`. Pass `PVMHOME=D:\pvm-home` to choose the data folder; upgrades and uninstalls reuse it.
+- The last page of the `.exe` installer offers "Open PVM Desktop". The MSI has no such page.
+- Uninstalling removes pvm, PVM Desktop with its shortcut and its "open at login" entry, the Xpra client and the `PATH` entry.
+
+Known limitations:
+
+- The prompt that offers to stop a running daemon has not been tested end to end. If it does not appear, cancel, run `pvm daemon stop`, and run setup again.
+- Stopping the daemon from setup waits up to about three minutes for VMs to shut down, without showing progress.
+- Setup cannot stop VMs left running without a daemon. It lists them and refuses; shut them down first.
+- Antivirus software can briefly lock new files. Setup retries for 10 seconds, then stops and keeps the previous version.
+- After `pvm upgrade`, Settings > Apps still shows the installer's version.
 
 </details>
 
-Windows has two backends, chosen with `PVM_BACKEND` or `backend` in `~/.pvm/config.yaml`:
+Windows has two backends, set with `PVM_BACKEND` or `backend` in `~/.pvm/config.yaml`:
 
-- `native`: the Windows daemon runs Windows QEMU directly, with WHPX when Windows Hypervisor Platform is enabled. No QEMU for Windows has virtio-9p (neither the pvm-qemu build nor MSYS2's), so `/share` is off; use [workspaces](#workspaces) for host folders.
-- `wsl`: commands go to `pvm` inside WSL2, with full `/share`, extra mounts and KVM where available.
-- `auto` (default): native when a native daemon runs or a native QEMU build is set up, otherwise WSL2 when pvm is installed there, otherwise native. To set up native QEMU while `auto` picks WSL2, run `PVM_BACKEND=native pvm qemu install`, or use the QEMU page of PVM Desktop.
+- `native`: Windows QEMU with WHPX. No Windows QEMU has virtio-9p, so `/share` is off; use [workspaces](#workspaces) for host folders.
+- `wsl`: commands go to `pvm` inside WSL2, with `/share`, extra mounts and KVM.
+- `auto` (default): native when a native daemon runs or a native QEMU is set up, else WSL2 when pvm is installed there, else native.
 
-Acceleration, DNS and WSL2 nested virtualization settings are in [SKILL.md](SKILL.md).
+Acceleration, DNS and WSL2 settings are in [SKILL.md](SKILL.md).
 
 ### macOS and Linux
 
@@ -101,7 +65,7 @@ Install GitHub CLI (`gh`) and Python 3, then:
 curl -fsSL https://raw.githubusercontent.com/BitterOrange/pvm/master/scripts/install.sh | sh
 ```
 
-The script installs `pvm` to `~/.local/bin` (set `INSTALL_DIR` to change it) together with the bundled QEMU runtime (set `PVM_SKIP_QEMU=1` to use the system QEMU). It checks the release checksum and its GitHub build attestation before replacing anything, and keeps the previous binary and runtime. The script also works in Git Bash on Windows, but the installers are the recommended way there.
+The script installs `pvm` to `~/.local/bin` (`INSTALL_DIR` changes it) with the pinned QEMU build (`PVM_SKIP_QEMU=1` skips it). It checks the checksum and the GitHub build attestation before replacing anything, and keeps the previous version.
 
 ### Quickstart
 
@@ -116,178 +80,175 @@ pvm exit add-warp my-warp
 pvm route dev1 --via my-warp
 ```
 
-`pvm list` shows each VM as `stopped`, `starting` with the current stage, `ready` or `failed`; the hint for a failed VM is printed below the table.
-
-Each VM gets a private host folder at `/share` (`~/.pvm/vms/<name>/share`) where 9p is available; `pvm mount` adds more, with the mount profiles described in [SKILL.md](SKILL.md).
+`pvm list` shows each VM as `stopped`, `starting` (with its stage), `ready` or `failed`. `pvm image default ubuntu:26.04` lets later creates leave out `--image`.
 
 ## Features
 
-### Fail-closed exit routing
+### Exit routing that fails closed
 
-Register a VPS exit and route the whole VM through it. TCP, UDP and ICMP go through WireGuard over UDP or TCP, and if the tunnel goes down, traffic is dropped instead of falling back to the host's connection.
+Register an exit and route the whole VM through it. TCP, UDP and ICMP go through WireGuard over UDP or TCP. If the tunnel goes down, traffic is dropped, never sent through the host.
 
 ```bash
-pvm exit add my-exit --server vps.example.com:18443 --token YOUR_TOKEN
+pvm exit add my-exit --server vps.example.com:18443 --token YOUR_TOKEN   # your own VPS
+pvm exit add-warp my-warp                                                # Cloudflare WARP, nothing to deploy
+pvm exit import my-sub --file clash.yaml --select NODE                   # a Clash/Mihomo/Surge node
 pvm route dev1 --via my-exit
-pvm ssh dev1 'curl -s ipinfo.io'
-pvm route dev1 --via direct
-```
-
-Or use Cloudflare WARP without deploying a VPS or installing anything in the VM:
-
-```bash
-pvm exit add-warp my-warp
-pvm route dev1 --via my-warp
-```
-
-Route every VM that has no explicit route, and add split-routing rules by domain or network:
-
-```bash
-pvm route default --via my-exit
-pvm route add direct --domain-suffix example.com
-pvm route add proxy --domain-suffix example.com --via my-exit
+pvm route default --via my-exit                       # every VM without its own route
+pvm route add direct --domain-suffix example.com      # split routing
 pvm route ls
 ```
 
-Only explicit direct and internal rules bypass the selected exit. To run your own exit, see [Deploy an exit on a VPS](#deploy-an-exit-on-a-vps).
+Only explicit `direct` and `internal` rules bypass the exit. Direct-routed VMs cannot reach the host LAN unless a rule allows it. To run your own exit, see [Deploy an exit on a VPS](#deploy-an-exit-on-a-vps).
+
+### Checks and automation
+
+- `pvm check dev1` samples the public exit IP on both the VM and gateway paths and cross-checks blocked probes against the gateway's counters.
+- `pvm route require-check dev1` keeps a VM offline until a check passes, then holds it to a 90-second lease that the daemon renews; if the daemon goes away, the VM goes offline. `pvm exit set my-exit --ip-mode static` cuts an exit whose IP or region changes.
+- `pvm route pause` and `resume` cut and restore a VM's external traffic.
+- Read-only commands take `--json`; `pvm capabilities` describes the contract offline; `pvm job` follows long operations.
+- `pvm dashboard` serves a read-only status page on loopback; `pvm diag` writes a redacted diagnostic zip.
+- `pvm audit dev1 --privacy`, `pvm doctor` and `pvm route explain dev1 example.com` inspect the local setup without network probes.
 
 ### Apps as host windows
 
-`pvm app` shows single programs or web pages from a VM as host windows through [Xpra](https://xpra.org). The host needs the Xpra 6.5 client, which the Windows installers include; the first app in a VM installs the Xpra server there from xpra.org's repository.
+`pvm app` shows single programs or web pages from a VM as host windows through [Xpra](https://xpra.org). The host needs the Xpra 6.5 client, which the Windows installers include.
 
 ```bash
 pvm app dev1 -- gedit
 pvm app dev1 https://mail.example.com --kiosk
-pvm app ls
 pvm app config dev1 --clipboard both --drop on --audio both
-pvm app attach dev1
-pvm app stop dev1 --all
-pvm app catalog
 pvm app install dev1 claude-code codex claude-desktop
+pvm app ls
+pvm app stop dev1 --all
 ```
 
-Clipboard and drops are off until you enable them per VM. With `--clipboard to-guest` or `both`, host content enters the VM only when one of its windows comes to the front or you copy while it is there, and content that password managers mark as excluded is never sent. Text, images and, on Windows hosts, files and folders copy both ways. Text typed with a host input method, such as Chinese with Microsoft Pinyin or emoji from the emoji panel, reaches the app as well, and on Windows hosts the input method's candidates open at the app's text cursor. Sound plays on the host's speakers; `--audio both` also lends the VM the host's microphone. While the VM plays nothing, no sound is sent, which saves CPU in the VM; `--audio-silence send` sends it anyway. The renderers of Chromium and Electron apps, such as Claude Desktop, run on 2 vCPUs, which draws faster than all of them in a VM; `--render-cpus N` changes that for apps started afterwards, and `0` lifts the limit. `--scale 1.25`, `1.5` or `2` has the VM draw its windows at fewer pixels and the host enlarge them: they draw faster, and text keeps its size but looks softer. `pvm app config` attaches open windows again, so changes to these settings apply at once. `--keyring host` encrypts the VM's login keyring with a password kept on the host and unlocks it before apps start, so apps such as Claude Desktop stay signed in; the default, `off`, leaves the keyring to the VM. See [docs/design/app.md](docs/design/app.md).
+- **Clipboard and drops** are off until enabled per VM. Host content enters the VM only while one of its windows is in front, and never content that password managers mark as excluded.
+- **Input methods**: text from a host input method, such as Microsoft Pinyin or the emoji panel, reaches the app.
+- **Sound** plays on the host; `--audio both` also lends the VM the microphone.
+- **Speed**: `--render-cpus N` limits the renderers of Chromium and Electron apps (2 by default), and `--scale 1.25|1.5|2` draws fewer pixels in the VM.
+- **Keyring**: `--keyring host` encrypts the VM's login keyring with a password kept on the host, so apps such as Claude Desktop stay signed in. The default, `off`, leaves it to the VM.
+- **Catalog**: `pvm app catalog` lists Claude Code, Codex CLI, Claude Desktop and Firefox. `pvm app install` runs a built-in script in the VM; downloads leave through the VM's exit.
 
-`pvm app catalog` lists the apps pvm can install for you: Claude Code, Codex CLI, Claude Desktop and Firefox, each the vendor's official Linux build. `pvm app install [<vm>] <id>...` runs the app's built-in install script as root inside the VM; downloads happen in the VM and leave through its exit, never through the host. `pvm app ls` also shows the catalog apps each VM has, including ones installed with the image or by hand.
+Changes made with `pvm app config` apply to open windows at once. See [docs/design/app.md](docs/design/app.md).
 
 ### Browser desktop
 
-`pvm desktop dev1` serves the VM's own XFCE desktop through TigerVNC and noVNC on a loopback URL, resized to the browser window. New VMs carry it over `pvm.stream`; VMs without that port keep the existing gateway map/relay and migrate after a restart. `--public` listens on `0.0.0.0` and still requires VNC authentication.
+`pvm desktop dev1` opens the VM's XFCE desktop in a browser tab through noVNC, on a loopback URL. `--public` listens on all interfaces and still requires the VNC password.
 
 ### Workspaces
 
-A workspace binds one host folder to one VM at `/workspace/<id>`. Pick a mode when you create it:
+A workspace binds a host folder to one VM at `/workspace/<id>`:
 
-- `mount`: one shared copy. Linux, macOS and WSL2 use 9p; the native Windows backend uses reverse sshfs over the existing SSH connection. Host changes raise no inotify events in the VM, so file watchers need polling (for example `CHOKIDAR_USEPOLLING=1`).
-- `sync`: a full copy on each side. `push` and `pull` move changes and stop on conflicts until you pass `--prefer host`, `--prefer vm` or `--keep-both`.
-- `copy`: upload once, work in the VM, then download the result with `clone`.
+- `mount`: one shared copy (9p, or reverse sshfs on native Windows). File watchers need polling, such as `CHOKIDAR_USEPOLLING=1`.
+- `sync`: a copy on each side; `push` and `pull` move changes and stop on conflicts.
+- `copy`: upload once, then download the result with `clone`.
 
 ```bash
 cd ~/src/web
 pvm workspace create web dev1 --mode sync
 pvm ssh 'npm install && npm test'
 pvm workspace pull web
-pvm workspace clone web ~/src/web-result
-pvm workspace rm web
 ```
 
-Inside a workspace folder, commands such as `pvm ssh`, `pvm exec`, `pvm app` and `pvm map` can leave out the VM name and use the workspace's VM; `pvm ssh` and commands started with `pvm app` start in the matching directory. Outside a workspace they use the VM set with `pvm default-vm dev1` (stored as `default_vm` in `~/.pvm/config.yaml`; `pvm default-vm --clear` removes it), else the only VM, if there is one. At a terminal pvm asks before starting a stopped VM.
+Uploads skip `.gitignore` matches and `node_modules`; `.pvmignore` adds rules. pvm refuses to share your home folder, a file system root, its own data folder, or folders with credentials such as `.ssh`, `.aws` or `.env` (`pvm mount --allow-sensitive` overrides this). `pvm workspace rm` never deletes host files. See [docs/design/workspace.md](docs/design/workspace.md).
 
-Uploads skip `.gitignore` matches and `node_modules`; a `.pvmignore` file adds or re-includes paths. pvm refuses to upload or mount the home directory, a file system root, its own data directory, or a tree with credentials such as `.ssh` or `.aws`, and `pvm workspace rm` never deletes host files. See [docs/design/workspace.md](docs/design/workspace.md).
-
-### Windows installers
-
-Releases ship `pvm_windows_amd64_setup.exe` and `pvm_windows_amd64_setup.msi`: per-user installers that need no administrator rights and bring pvm, PVM Desktop, the pinned pvm-qemu build and the Xpra client for `pvm app` in one step. They detect a running pvm before replacing files and keep your VMs on uninstall. See [Installation on Windows](#windows).
+**The VM name can be left out.** Inside a workspace folder, `pvm ssh`, `pvm exec`, `pvm app` and `pvm map` use the workspace's VM and start in the matching folder. Elsewhere they use the VM set with `pvm default-vm dev1`, else the only VM. At a terminal, pvm asks before starting a stopped VM.
 
 ### PVM Desktop
 
-PVM Desktop is a window for the common paths, on Windows with the native (WHPX) backend. Open it from the Start menu, or run `pvm-desktop.exe`.
+A window for the common tasks, on Windows with the native backend. Open it from the Start menu.
 
-- **VMs.** See each VM's state and startup stage; start, stop and delete; change its vCPUs, memory and disk; open a terminal, an app or the file manager; install catalog apps; set the default VM.
-- **Create.** A form for a new VM with its size, exit, clipboard, drop and audio settings, and the catalog apps to preinstall. The exit is set before the VM's first boot.
-- **Exits.** Add, test and remove exits, set the default exit and change a VM's exit.
-- **Workspaces.** Create and remove workspaces, push and pull, and open the host folder, a terminal, an app or the file manager in the matching guest folder.
-- **Settings.** The default VM, starting the daemon at login, opening the app at login, and the language of the window: English or Simplified Chinese.
+- **VMs**: state and startup stage; start, stop, delete, resize; open a terminal, an app or the file manager; install catalog apps.
+- **Create**: a new VM with its size, exit, app settings and apps to preinstall.
+- **Exits**, **Workspaces**, **QEMU** and **Settings** (default VM, start at login, English or Simplified Chinese).
 
-The app does nothing the CLI cannot: every change runs `pvm.exe`, and its output shows in the window. Notes:
-
-- It needs the Microsoft Edge WebView2 Runtime, which Windows 10 and 11 normally have. When it is missing, the app says so and opens Microsoft's download page; nothing is installed for you.
-- With the WSL2 backend the app only shows an explanation; use the CLI there.
-- `pvm upgrade` does not update the app. When the app and the daemon report different versions, Settings says so; run the new installer.
-- It is new and has not yet been tested end to end on Windows. There is no tray icon, and no screens for snapshots, port maps, mounts or logs. See [docs/design/gui.md](docs/design/gui.md).
+Every change runs `pvm.exe`, so the app can do nothing the CLI cannot. It needs the Microsoft Edge WebView2 Runtime, which Windows 10 and 11 normally have. It has not yet been tested end to end from the installers. See [docs/design/gui.md](docs/design/gui.md).
 
 ### Architecture
 
-The host `pvm` binary provides the CLI and daemon, and also runs as the VPS exit agent. A separate guest binary built from `cmd/agent` carries only the guest agent, current-VM port maps and the guest skill. The daemon owns VM and cluster lifecycle; the managed gateway VM provides DNS, routing, WireGuard devices and the fail-closed kill switch. WARP registration and credentials are managed on the host without `warp-cli`, `wgcf` or extra configuration files.
+The host `pvm` binary is the CLI and the daemon, and also runs as the VPS exit agent. VMs run a separate small guest agent. A managed gateway VM provides DNS, routing, the WireGuard tunnels and the kill switch.
 
 ```text
 Control: pvm CLI -> pvm daemon -> gateway VM and dev VMs
-Data:    dev VM -> gateway VM -> WireGuard tunnel -> exit-agent on VPS or Cloudflare WARP -> Internet
+Data:    dev VM -> gateway VM -> WireGuard tunnel -> exit on VPS, Cloudflare WARP or Mihomo node -> Internet
 ```
 
 ## QEMU
 
-pvm runs QEMU only from the build you select with `pvm qemu`, by absolute path; it never searches PATH and never switches builds by itself. Builds sit side by side under `~/.pvm/runtime/qemu/builds`, and one is the default. There are two sources:
+pvm runs QEMU only from the build you select with `pvm qemu`, by absolute path. It never searches `PATH` and never switches builds on its own. There are two sources:
 
-- **Project build**: QEMU built from the signed upstream source by the [pvm-qemu](https://github.com/BitterOrange/pvm-qemu) project, with the complete source in each release. pvm installs an archive only when its SHA-256 matches a digest pinned in the pvm release; no administrator rights or `gh` are needed. These are not official QEMU releases, and pvm-qemu is not affiliated with the QEMU project.
-- **Official build**: your platform's own QEMU, installed by you: Homebrew on macOS (`brew install qemu`), your distribution's packages on Linux (8.2 or newer, for example `sudo apt install qemu-system-x86 qemu-utils`), and MSYS2 UCRT64 on Windows (`pacman -S mingw-w64-ucrt-x86_64-qemu`), which qemu.org links to.
+- **Project build**: built from QEMU's signed source by [pvm-qemu](https://github.com/BitterOrange/pvm-qemu), with the complete source in each release. pvm installs it only when its SHA-256 matches a digest pinned in the pvm release. These are not official QEMU releases.
+- **Official build**: your platform's own QEMU: Homebrew on macOS, your distribution's packages on Linux (8.2 or newer), or MSYS2 UCRT64 on Windows.
 
 ```bash
-pvm qemu                                # builds, default, recommended pin and leftovers
-pvm qemu install -y                     # the recommended project build
-pvm qemu install --file pvm-qemu-11.1.3-pvm1-linux-amd64.tar.gz -y   # offline, from a downloaded archive
-pvm qemu use official                   # Homebrew, your distribution or MSYS2
-pvm qemu check --default                # exit 0 ok, 3 not set up, 1 failing
-pvm qemu rm 11.1.3-pvm1 -y              # remove a build that is not the default
-pvm qemu gc -y                          # remove folders left by older pvm versions
+pvm qemu                    # builds, the default and the recommended pin
+pvm qemu install -y         # the recommended project build
+pvm qemu use official       # Homebrew, your distribution or MSYS2
+pvm qemu check --default    # exit 0 ok, 3 not set up, 1 failing
+pvm qemu gc -y              # remove folders left by older versions
 ```
 
-Every build passes a minimum version, accelerator and device probes, a test start with pvm's own arguments and a firmware check (on macOS also the hypervisor entitlement) before first use and whenever its binary changes; a project build whose files changed is refused. Downloads honour `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` and resume after interruptions. The daemon runs without QEMU and picks up `pvm qemu install` or `use` without a restart; until then, creating or starting VMs fails with the commands to run. RAM snapshots restore only into the build that wrote them. The QEMU an older pvm installed is taken over as a project build when it matches a pinned build; any other old folder is left for `pvm qemu gc`.
+Every build must pass version, accelerator, device, test-start and firmware checks before first use and after its binary changes; a project build whose files changed is refused. RAM snapshots restore only into the build that wrote them. The daemon runs without QEMU and picks up a new build without a restart.
 
 ## Supported images and hosts
 
-- Images: `ubuntu:26.04`, `ubuntu:24.04`, `debian:13`, and `debian:12`.
-- Hosts: macOS on arm64 (`darwin/arm64`), Linux on amd64 (`linux/amd64`), and Windows on amd64 (`windows/amd64` via WSL2 bridge or native QEMU/WHPX; selectable with `PVM_BACKEND=auto|wsl|native` or `backend` in `config.yaml`).
-- VMs always use the host's native architecture; cross-architecture emulation is not supported. Linux arm64 release binaries are for VPS exit agents, not for running a pvm host.
+- Images: `ubuntu:26.04`, `ubuntu:24.04`, `debian:13`, `debian:12`.
+- Hosts: macOS arm64, Linux amd64, Windows amd64 (native WHPX or WSL2).
+- VMs use the host's architecture; there is no cross-architecture emulation. Linux arm64 builds are for VPS exit agents only.
 
 ## Deploy an exit on a VPS
 
-Verify the release archive for the VPS architecture and create an owner-only token file, then run the exit agent as a persistent service:
+Download and verify the release archive for the VPS, create an owner-only token file, then install the exit agent as a systemd service:
 
 ```bash
-pvm exit-agent --listen :18443 --token-file /etc/pvm-exit/token
+pvm exit-agent install --listen :18443 --token-file /etc/pvm-exit/token
 ```
 
-Then register it on the host with `pvm exit add`. See [SKILL.md](SKILL.md#standard-flow-deploy-an-exit-over-ssh) for the complete SSH deployment, including a systemd unit, fingerprint verification, speed tests, and rollback.
+Register it on your host with `pvm exit add`. [SKILL.md](SKILL.md#standard-flow-deploy-an-exit-over-ssh) has the complete flow over SSH, with fingerprint checks, speed tests and rollback.
 
-The VPS firewall must accept TCP 18443 (control plane, `--listen`), UDP 18443 (WireGuard over UDP, `--udp-port`) and TCP 18444 (WireGuard over TCP, `--tcp-port`). With the `nft` or `iptables` NAT backend it must also forward traffic from the agent's TUN devices: `pvmexit0` for the UDP transport and `pvmexit1` for the TCP transport (the prefix follows `--tun-prefix`). The agent's own nftables table cannot override a drop elsewhere in the forward path, such as ufw's default `deny (routed)`. In that case `pvm exit test` still passes, because it only probes the agent itself, but VMs routed through the exit cannot open connections to the internet, although ping may still work. With ufw, allow the forwarding, replacing `eth0` with the VPS's internet-facing interface:
+The VPS firewall must accept TCP 18443 (control), UDP 18443 (WireGuard over UDP) and TCP 18444 (WireGuard over TCP), and must forward traffic from the agent's `pvmexit0` and `pvmexit1` devices. ufw's default `deny (routed)` blocks that forwarding; allow it, with `eth0` replaced by the internet-facing interface:
 
 ```bash
 ufw route allow in on pvmexit0 out on eth0
 ufw route allow in on pvmexit1 out on eth0
 ```
 
-To connect a phone or laptop with a standard WireGuard client, export a separate client profile from a UDP exit:
+For a phone or laptop with a standard WireGuard client, `pvm exit client-config my-exit --output phone.conf` exports a profile and shows a QR code. Use one profile per device. It is a plain IPv4 full tunnel, without pvm's DNS or split routing.
 
-```bash
-pvm exit client-config my-exit --output phone.conf
-```
+## Upgrade
 
-This creates a new client key, enrolls it with the exit agent, writes the config with mode `0600`, and displays a QR code for mobile apps. Run it once per device. Standard clients support UDP only and get a full-tunnel IPv4 VPN, not pvm's gateway DNS or split-routing rules. IPv6 is not tunneled.
+`pvm upgrade` verifies the release, checks that the new version accepts your QEMU, saves a recovery point, replaces the binary, restarts the daemon and starts the VMs that were running. It never changes QEMU or PVM Desktop. `pvm upgrade --rollback` goes back.
+
+Update checks are off by default; set `update_check: true` in `~/.pvm/config.yaml` to turn them on.
+
+## Roadmap
+
+Recent releases (all versions are in [docs/release-notes](docs/release-notes)):
+
+- **v1.4.1** (in progress): upstream v1.3.0-1.3.1 merged, bringing Mihomo exits, `pvm check`, `pvm diag`, `pvm dashboard`, `--json`, `pvm job`, `pvm ssh-config`, `pvm exit-agent install`, `pvm image default`, VMs restarted after a daemon restart, and the clipboard bridge on macOS and Linux.
+- **v1.4.0**: `pvm qemu`, with pinned pvm-qemu builds or the platform's official QEMU; the gateway boots on M1 Macs.
+- **v1.3.x**: PVM Desktop, the app catalog, the keyring setting, window scale and input methods in `pvm app`.
+
+Next:
+
+- Installers and `install.sh` without QEMU, which `pvm qemu install` then sets up ([plan](docs/design/qemu.md))
+- WHPX: AVX in VMs, and a QEMU chosen per VM
+- PVM Desktop: tested from the installers, updating itself, a tray icon, and screens for snapshots, port maps and mounts
+- `pvm desktop` as a host window, like `pvm app`
+- `pvm app` on WSL2
+- Windows CI for the remaining packages, and an installer smoke test
+
+Details and candidates are in [docs/roadmap.md](docs/roadmap.md).
 
 ## Documentation
 
-- [SKILL.md](SKILL.md): Complete usage manual for agents and people; `pvm skill` prints the embedded copy.
-- [SECURITY.md](SECURITY.md): Host/guest trust boundaries, credentials, image provenance, and network verification; `pvm security` prints the embedded copy.
-- [AGENTS.md](AGENTS.md): Repository map, build and test workflow, and development rules.
-- `pvm upgrade` verifies the release, checks that the new version accepts your default QEMU build, saves a recovery point, replaces the installed binary, restarts a running daemon, and attempts to restore every previously running user VM. It never changes QEMU or PVM Desktop. Use `--no-restart` to replace only the binary (then run `pvm daemon restart`), or `pvm upgrade --rollback` to restore the saved binary and VM recovery plan. `--to` refuses versions below v1.4.0; use `--rollback` or that version's installer.
-- `pvm audit dev1 --privacy`, `pvm doctor`, and `pvm route explain dev1 example.com` inspect local configuration without starting a daemon or making network probes; their output redacts identifying values.
-- Automatic update checks are off by default. Set `update_check: true` in `~/.pvm/config.yaml` or `PVM_UPDATE_CHECK=1` to opt in; `PVM_NO_UPDATE_CHECK=1` disables them.
-- For independently trusted image signing keys, use `pvm image fetch ubuntu:26.04 --keyring /trusted/ubuntu-cloudimage.gpg`. This requires `gpgv`; pvm does not download or trust keys automatically.
+- [SKILL.md](SKILL.md): the full manual for people and agents; `pvm skill` prints it.
+- [SECURITY.md](SECURITY.md) ([简体中文](SECURITY.zh-CN.md)): trust boundaries, credentials, images, QEMU and network checks; `pvm security` prints the English version.
+- [AGENTS.md](AGENTS.md): repository map, build and test workflow, and development rules.
 
 ## Development
 
-A full build uses Go 1.27.4 and garble v0.18.0, with both versions pinned in CI. The build uses the dedicated `cmd/agent` entry point and reproducible obfuscation settings.
+Builds use Go 1.27.4 and garble v0.18.0, both pinned in CI.
 
 ```bash
 go install mvdan.cc/garble@v0.18.0
@@ -295,18 +256,11 @@ go install mvdan.cc/garble@v0.18.0
 go test ./...
 ```
 
-On Windows, install Git for Windows, Go 1.27.4 and garble v0.18.0, then run the wrapper from PowerShell. It runs `script/build.sh` through Git Bash and writes `pvm.exe`. No build includes QEMU: set one up with `pvm qemu install` or `pvm qemu use official`.
+- On Windows, install Git for Windows, Go and garble, then run `.\script\build.ps1` from PowerShell; it writes `pvm.exe`.
+- `./script/build-desktop.sh` builds `pvm-desktop.exe` and needs Node.js 22. `go build ./...` and `go test ./...` do not.
+- Do not run the full `go test ./...` on Windows: the suite is written for Unix and many tests fail there for unrelated reasons. Run targeted tests, such as `go test ./internal/qemu -run Accel`, and the full suite on Linux, macOS or WSL2.
+- No build includes QEMU. CI checks the pinned pvm-qemu builds against their releases and attestations.
 
-```powershell
-go install mvdan.cc/garble@v0.18.0
-.\script\build.ps1
-.\pvm.exe version
-```
+## License
 
-`./script/build-desktop.sh` builds `pvm-desktop.exe` on any host with Go and Node.js 22 (npm): it builds the frontend in `cmd/pvm-desktop/frontend`, then cross-compiles the app. `go build ./...` and `go test ./...` need no Node.js, as the frontend is only embedded by that script.
-
-Do not run the full `go test ./...` on a Windows host. The test suite is written for Unix (file permission bits, paths such as `/tmp`, symlinks, and tools like `ip`, `gh` and `bash`), so many tests fail there for reasons unrelated to your change, and the `internal/cli` tests keep respawning themselves and leave `cli.test.exe` processes behind. On Windows, run only targeted tests for what you changed, for example `go test ./internal/qemu -run Accel`, and rely on Linux or macOS (CI or WSL2) for the full suite.
-
-CI tests and builds each native platform once per commit, caches Go and build tools, and checks the pinned pvm-qemu builds against their releases and attestations. This repository does not build or pack QEMU. Releases can reuse verified artifacts from a successful master run of the exact same commit. Linux namespace tests must run rather than skip.
-
-Security boundaries: user VMs share a layer-2 network; global shares and extra host mounts are explicit trust boundaries. They are not isolated hostile tenants. Explicit direct/internal rules can bypass a default exit. See [SECURITY.md](SECURITY.md) for guarantees, limitations, and deployment checks.
+pvm is released under the [MIT License](LICENSE). Third-party licenses are listed in [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES).
