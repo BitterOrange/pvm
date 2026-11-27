@@ -12,6 +12,47 @@ export interface State {
   tcg_fallback: number;
   data_dir: string;
   host_cpus: number; // the host's logical processors
+  qemu: QEMUState;
+  marker: string;
+}
+
+// QEMUState is read without the daemon. ready is false until a default
+// build is set; the app then shows its QEMU page.
+export interface QEMUState {
+  ready: boolean;
+  pending_adoption: boolean;
+  default: string;
+  default_label: string;
+  problem: string; // why VMs cannot start now, or ""
+  blocked: string[];
+  recommended: QEMURecommended;
+  official: QEMUOfficial;
+}
+
+export interface QEMURecommended {
+  id: string; // "" when this pvm pins no build for the host
+  size_mb: number;
+  installed: boolean;
+}
+
+export interface QEMUOfficial {
+  found: boolean;
+  label: string;
+  version: string;
+  path: string;
+  problem: string; // how to install it, when not found
+  registered: boolean;
+}
+
+export interface QEMUBuild {
+  id: string;
+  label: string;
+  source: "project" | "official";
+  version: string;
+  path: string;
+  default: boolean;
+  virtio_9p: boolean;
+  withdrawn: string;
 }
 
 export interface VM {
@@ -161,6 +202,9 @@ export interface Backend {
   Images(): Promise<Image[]>;
   CreateDefaults(): Promise<CreateDefaults>;
   PickFolder(): Promise<string>;
+  QEMUBuilds(): Promise<QEMUBuild[]>;
+  PickQEMUArchive(): Promise<string>;
+  CheckQEMUAgain(): Promise<void>;
 
   StartDaemon(): Promise<Task>;
   StopDaemon(confirmed: boolean): Promise<Task>;
@@ -188,6 +232,11 @@ export interface Backend {
   CreateWorkspace(request: CreateWorkspaceRequest): Promise<Task>;
   RemoveWorkspace(id: string, confirmed: boolean): Promise<Task>;
   SetDaemonAtLogin(on: boolean): Promise<Task>;
+  InstallQEMU(): Promise<Task>;
+  InstallQEMUFromFile(path: string): Promise<Task>;
+  UseOfficialQEMU(): Promise<Task>;
+  UseQEMU(id: string): Promise<Task>;
+  RemoveQEMU(id: string, confirmed: boolean): Promise<Task>;
 
   OpenTerminal(name: string): Promise<void>;
   OpenWorkspaceTerminal(id: string): Promise<void>;
@@ -199,6 +248,7 @@ interface Runtime {
   EventsOn(name: string, callback: (data: never) => void): () => void;
   WindowIsMinimised(): Promise<boolean>;
   ClipboardSetText(text: string): Promise<boolean>;
+  BrowserOpenURL(url: string): void;
 }
 
 declare global {
@@ -216,6 +266,7 @@ export interface Bridge {
   onTaskOutput(callback: (output: TaskOutput) => void): void;
   windowIsMinimised(): Promise<boolean>;
   copyText(text: string): Promise<boolean>;
+  openURL(url: string): void;
 }
 
 let bridge: Bridge = {
@@ -224,6 +275,7 @@ let bridge: Bridge = {
   onTaskOutput: (callback) => void window.runtime.EventsOn("task-output", callback),
   windowIsMinimised: () => window.runtime.WindowIsMinimised(),
   copyText: (text) => window.runtime.ClipboardSetText(text),
+  openURL: (url) => window.runtime.BrowserOpenURL(url),
 };
 
 // bound is false where no Wails window carries the page, as under
@@ -244,6 +296,8 @@ export const onTaskOutput = (callback: (output: TaskOutput) => void): void => br
 export const windowIsMinimised = (): Promise<boolean> => bridge.windowIsMinimised();
 
 export const copyText = (text: string): Promise<boolean> => bridge.copyText(text);
+
+export const openURL = (url: string): void => bridge.openURL(url);
 
 // errorText reads a rejected call: the backend rejects with a string.
 export function errorText(e: unknown): string {

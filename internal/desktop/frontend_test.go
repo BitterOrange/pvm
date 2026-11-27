@@ -99,6 +99,7 @@ func TestFrontendTypes(t *testing.T) {
 		reflect.TypeFor[Workspace](), reflect.TypeFor[Settings](), reflect.TypeFor[Image](), reflect.TypeFor[CreateDefaults](),
 		reflect.TypeFor[AppConfig](), reflect.TypeFor[CreateRequest](), reflect.TypeFor[Resources](), reflect.TypeFor[AddExitRequest](),
 		reflect.TypeFor[CreateWorkspaceRequest](), reflect.TypeFor[Step](), reflect.TypeFor[Task](), reflect.TypeFor[TaskOutput](),
+		reflect.TypeFor[QEMUState](), reflect.TypeFor[QEMURecommended](), reflect.TypeFor[QEMUOfficial](), reflect.TypeFor[QEMUBuild](),
 	} {
 		_, block, ok := strings.Cut(string(data), "export interface "+typ.Name()+" {")
 		if !ok {

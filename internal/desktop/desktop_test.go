@@ -14,9 +14,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/huangzheng2016/pvm/internal/buildinfo"
 	"github.com/huangzheng2016/pvm/internal/config"
 	"github.com/huangzheng2016/pvm/internal/exit"
 	"github.com/huangzheng2016/pvm/internal/paths"
+	"github.com/huangzheng2016/pvm/internal/qemu"
 	"github.com/huangzheng2016/pvm/internal/workspace"
 )
 
@@ -1050,13 +1052,17 @@ func TestSecretsStayInTheBackend(t *testing.T) {
 // boundMethods is everything the page can call. A new exported method
 // on App is reachable from JavaScript; add it here on purpose.
 var boundMethods = []string{
-	"AddExit", "AddWarpExit", "AppSettings", "Catalog", "ClearDefaultVM", "ConfigureApps", "CreateDefaults", "CreateVM",
-	"CreateWorkspace", "DefaultExit", "DeleteVM", "Exits", "Images", "InstallApps", "InstalledApps", "OpenFiles",
-	"OpenTerminal", "OpenWorkspaceFiles", "OpenWorkspaceFolder", "OpenWorkspaceTerminal", "PickFolder",
-	"RemoveExit", "RemoveWorkspace", "ResizeVM", "RunApp", "RunCatalogApp", "RunWorkspaceApp", "SetAppAtLogin",
+	"AddExit", "AddWarpExit", "AppSettings", "Catalog", "CheckQEMUAgain", "ClearDefaultVM", "ConfigureApps", "CreateDefaults", "CreateVM",
+	"CreateWorkspace", "DefaultExit", "DeleteVM", "Exits", "Images", "InstallApps", "InstallQEMU", "InstallQEMUFromFile", "InstalledApps", "OpenFiles",
+	"OpenTerminal", "OpenWorkspaceFiles", "OpenWorkspaceFolder", "OpenWorkspaceTerminal", "PickFolder", "PickQEMUArchive", "QEMUBuilds",
+	"RemoveExit", "RemoveQEMU", "RemoveWorkspace", "ResizeVM", "RunApp", "RunCatalogApp", "RunWorkspaceApp", "SetAppAtLogin",
 	"SetDaemonAtLogin", "SetDefaultExit", "SetDefaultVM", "SetVMExit", "Settings", "StartDaemon", "StartVM",
-	"State", "StopDaemon", "StopVM", "SyncWorkspace", "TestExit", "VMs", "Workspaces",
+	"State", "StopDaemon", "StopVM", "SyncWorkspace", "TestExit", "UseOfficialQEMU", "UseQEMU", "VMs", "Workspaces",
 }
+
+// qemuMethods set up native QEMU, which is how the WSL page moves the app
+// to the native backend, so they work under every backend.
+var qemuMethods = []string{"CheckQEMUAgain", "InstallQEMU", "InstallQEMUFromFile", "PickQEMUArchive", "QEMUBuilds", "RemoveQEMU", "UseOfficialQEMU", "UseQEMU"}
 
 func TestBoundMethods(t *testing.T) {
 	typ := reflect.TypeFor[*App]()
@@ -1075,7 +1081,7 @@ func TestBoundMethods(t *testing.T) {
 }
 
 // TestWSLRefusal calls every bound method with zero arguments under the
-// WSL2 backend: only State answers.
+// WSL2 backend: only State and the QEMU setup answer.
 func TestWSLRefusal(t *testing.T) {
 	f := newFixture(t)
 	f.app.backend = func() (string, error) { return "wsl", nil }
@@ -1086,7 +1092,7 @@ func TestWSLRefusal(t *testing.T) {
 	v := reflect.ValueOf(f.app)
 	for i := range v.NumMethod() {
 		name := v.Type().Method(i).Name
-		if name == "State" {
+		if name == "State" || slices.Contains(qemuMethods, name) {
 			continue
 		}
 		m := v.Method(i)
@@ -1173,5 +1179,42 @@ func TestCommandLine(t *testing.T) {
 	}
 	if got, want := commandLine("x", `a\\"b c\`, `C:\dir\`), `pvm x "a\\\\\"b c\\" C:\dir\`; got != want {
 		t.Fatalf("got %s, want %s", got, want)
+	}
+}
+
+// TestQEMUSetupUnderWSL: the QEMU page runs pvm qemu with the native
+// backend forced, and the backend is resolved again afterwards.
+func TestQEMUSetupUnderWSL(t *testing.T) {
+	f := newFixture(t)
+	backends := 0
+	f.app.backend = func() (string, error) { backends++; return "wsl", nil }
+	f.app.detectOfficial = func() (*qemu.Official, error) { return nil, errors.New("not installed") }
+	st, err := f.app.State()
+	if err != nil || st.QEMU.Ready || st.QEMU.Official.Found || st.Marker != buildinfo.DesktopQEMUMarker {
+		t.Fatalf("state = %+v, %v", st, err)
+	}
+	task, err := f.app.InstallQEMU()
+	if err != nil || !task.OK {
+		t.Fatalf("install: %+v, %v", task, err)
+	}
+	if len(f.runner.calls) != 1 {
+		t.Fatalf("calls = %+v", f.runner.calls)
+	}
+	c := f.runner.calls[0]
+	if !slices.Equal(c.argv, []string{"qemu", "install", "--use", "-y"}) || !slices.Equal(c.env, []string{"PVM_BACKEND=native"}) {
+		t.Errorf("call = %+v", c)
+	}
+	f.app.State()
+	if backends != 2 {
+		t.Errorf("backend resolved %d times, want again after the install", backends)
+	}
+	if _, err := f.app.UseQEMU("latest"); err == nil {
+		t.Error("UseQEMU took a bad id")
+	}
+	if _, err := f.app.RemoveQEMU("11.1.3-pvm1", false); err == nil {
+		t.Error("RemoveQEMU ran unconfirmed")
+	}
+	if _, err := f.app.InstallQEMUFromFile("relative.tar.gz"); err == nil {
+		t.Error("InstallQEMUFromFile took a relative path")
 	}
 }

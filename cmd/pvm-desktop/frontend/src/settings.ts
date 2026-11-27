@@ -2,6 +2,7 @@ import { backend, type Settings } from "./api";
 import { badge, banner, callout, h, loading, mono, select, tag, type Child } from "./dom";
 import { choice, choose, t, type Choice } from "./i18n";
 import { icon } from "./icons";
+import * as qemu from "./qemu";
 import { act, busy, data } from "./store";
 
 const panel = (title: string, ...content: Child[]): HTMLElement =>
@@ -119,6 +120,8 @@ function about(): HTMLElement {
       h("dd", null, value(st.app_version)),
       h("dt", null, t.settings.daemon),
       h("dd", null, value(st.daemon_version), mismatch && badge(t.settings.differs, "warn")),
+      h("dt", { lang: "en" }, t.qemu.label),
+      h("dd", null, st.qemu.default_label === "" ? h("span", { class: "muted" }, t.qemu.none) : mono(st.qemu.default_label)),
       h("dt", null, t.settings.accelerator),
       h("dd", null, st.accel === "" ? value("") : tag(st.accel), accelerator !== "" && h("span", { class: "muted" }, accelerator)),
       h("dt", null, t.settings.dataFolder),
@@ -131,6 +134,7 @@ function about(): HTMLElement {
         mismatch && callout("warn", "note", ...t.settings.versions(st.app_version, st.daemon_version, mono("pvm upgrade"))),
         st.tcg_fallback > 0 && callout("warn", "note", t.settings.fallback(st.tcg_fallback)),
       ),
+    h("div", { class: "panel-notes" }, h("p", { class: "hint" }, t.qemu.notice)),
   );
 }
 
@@ -149,7 +153,7 @@ export function render(): HTMLElement {
         "div",
         { class: "cols" },
         h("div", { class: "col" }, s ? defaultVM(s) : error === "" && loading(), s && signIn(s), languagePanel()),
-        h("div", { class: "col" }, data.state && about()),
+        h("div", { class: "col" }, data.state && qemu.settingsPanel(), data.state && about()),
       ),
     ),
   );

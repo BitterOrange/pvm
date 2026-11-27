@@ -150,7 +150,7 @@ func CmdImage(args []string) int {
 }
 
 func cmdImageBuild(p *paths.Paths, spec string, keep bool, cpus, mem, disk int) int {
-	tc, err := qemu.Find(p.Runtime)
+	tc, err := resolveQEMU(p)
 	if err != nil {
 		return fatalf("%v", err)
 	}
@@ -245,7 +245,7 @@ func CmdCreate(args []string) int {
 	}
 	supports9p := true
 	if runtime.GOOS == "windows" {
-		tc, err := qemu.Find(p.Runtime)
+		tc, err := resolveQEMU(p)
 		if err != nil {
 			return fatalf("%v", err)
 		}

@@ -277,10 +277,11 @@ func TestBuildArgsCommaPathsWithQEMU(t *testing.T) {
 	if err != nil {
 		t.Skip("qemu-img unavailable")
 	}
-	tc, err := lookup(system, img)
-	if err != nil {
-		t.Fatal(err)
+	fw := filepath.Join(filepath.Dir(system), "..", "share", "qemu")
+	if _, err := os.Stat(fw); err != nil {
+		fw = ""
 	}
+	tc := &Toolchain{System: system, Img: img, FirmwareDir: fw}
 	if native.Arch == "arm64" && tc.FirmwareDir == "" {
 		t.Skip("UEFI firmware unavailable")
 	}

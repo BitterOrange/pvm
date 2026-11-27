@@ -34,6 +34,8 @@ type step struct {
 	// wait names a VM whose stages are followed until it is ready, after
 	// argv succeeded.
 	wait string
+	// env is added to the environment of the command.
+	env []string
 }
 
 // Step is the frontend's view of a step.
@@ -123,7 +125,7 @@ func (a *App) runStep(id int64, index int, s step) error {
 		a.send(eventOutput, TaskOutput{ID: id, Step: index, Line: text})
 	}
 	if len(s.argv) > 0 {
-		code, err := a.run.run(command{argv: s.argv, dir: s.dir}, line)
+		code, err := a.run.run(command{argv: s.argv, dir: s.dir, env: s.env}, line)
 		if err != nil {
 			return err
 		}

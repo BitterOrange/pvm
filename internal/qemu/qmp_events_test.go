@@ -6,29 +6,11 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
-
-func TestBrokenLiveRestoreUnknownVersion(t *testing.T) {
-	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
-		t.Skip("HVF live-restore regression only exists on darwin/arm64")
-	}
-	tc := &Toolchain{Version: [3]int{0, 0, 0}}
-	if !tc.BrokenLiveRestore(AccelHVF) {
-		t.Fatal("unparseable version must be treated as unknown and refused (fail closed)")
-	}
-	if tc.BrokenLiveRestore(AccelTCG) {
-		t.Fatal("non-hvf must not be flagged")
-	}
-	tc.Bundled = true
-	if tc.BrokenLiveRestore(AccelHVF) {
-		t.Fatal("bundled runtime must be exempt")
-	}
-}
 
 // fakeQMP is a scripted QMP server: greeting, capabilities, then per
 // device_del it emits the scripted lines.

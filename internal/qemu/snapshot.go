@@ -27,18 +27,23 @@ import (
 // Snapshot creation must resume a paused guest on failure and replace the
 // old snap base only after the new conversion completes.
 type SnapshotManifest struct {
-	Name        string    `json:"name"`
-	Arch        string    `json:"arch"`
-	CPUs        int       `json:"cpus"`
-	MemMB       int       `json:"mem_mb"`
-	Accel       Accel     `json:"accel"`
-	GPU         bool      `json:"gpu"`
-	Balloon     bool      `json:"balloon"`
-	Stream      bool      `json:"stream,omitempty"` // the VM had the pvm.stream port
-	QEMUVersion string    `json:"qemu_version"`
-	PVMVersion  string    `json:"pvm_version"`
-	CreatedAt   time.Time `json:"created_at"`
-	Consumed    bool      `json:"consumed"`
+	Name    string `json:"name"`
+	Arch    string `json:"arch"`
+	CPUs    int    `json:"cpus"`
+	MemMB   int    `json:"mem_mb"`
+	Accel   Accel  `json:"accel"`
+	GPU     bool   `json:"gpu"`
+	Balloon bool   `json:"balloon"`
+	Stream  bool   `json:"stream,omitempty"` // the VM had the pvm.stream port
+	// QEMUBuild is the build that wrote the RAM stream, and QEMUArgs the
+	// CPU-relevant arguments the VM ran with: a stream restores only into
+	// the same binary and CPU model. Snapshots written before pvm v1.4 have
+	// neither and are refused.
+	QEMUBuild  *BuildIdentity `json:"qemu_build,omitempty"`
+	QEMUArgs   []string       `json:"qemu_args,omitempty"`
+	PVMVersion string         `json:"pvm_version"`
+	CreatedAt  time.Time      `json:"created_at"`
+	Consumed   bool           `json:"consumed"`
 }
 
 var ErrNoSnapshot = errors.New("no snapshot")
@@ -84,9 +89,9 @@ func (m *SnapshotManifest) save(vmDir string) error {
 	return fsutil.AtomicWrite(SnapPaths(vmDir).Manifest, data, 0o600)
 }
 
-// checkMatch refuses a heterogeneous restore (migration streams are only
-// guaranteed within one qemu runtime).
-func (m *SnapshotManifest) checkMatch(c *VMConfig, qemuVersion string) error {
+// checkMatch refuses a heterogeneous restore: a migration stream restores
+// only into the QEMU build and CPU arguments that wrote it.
+func (m *SnapshotManifest) checkMatch(c *VMConfig, tc *Toolchain) error {
 	if m.Arch != native.Arch || m.CPUs != c.CPUs || m.MemMB != c.MemMB {
 		return fmt.Errorf("snapshot mismatch: snap %s/%dc/%dMB vs vm %s/%dc/%dMB; delete the snapshot or recreate the vm identically",
 			m.Arch, m.CPUs, m.MemMB, native.Arch, c.CPUs, c.MemMB)
@@ -114,10 +119,40 @@ func (m *SnapshotManifest) checkMatch(c *VMConfig, qemuVersion string) error {
 	} else if c.StreamSock == "" {
 		return fmt.Errorf("snapshot has the pvm.stream port but the vm config does not; heterogeneous restore refused, delete the snapshot")
 	}
-	if m.QEMUVersion != qemuVersion {
-		return fmt.Errorf("snapshot was written by qemu %s, current runtime is %s; migration across qemu versions is not guaranteed, delete the snapshot", m.QEMUVersion, qemuVersion)
+	if m.QEMUBuild == nil {
+		return fmt.Errorf("the snapshot of %s was written before pvm v1.4.0 and cannot be bound to a QEMU build; restore it under the version that wrote it (pvm upgrade --rollback -y, then pvm start %s, then pvm upgrade) or drop it: pvm snapshot rm %s", m.Name, m.Name, m.Name)
+	}
+	if tc != nil && tc.Build != nil && !m.QEMUBuild.Same(tc.Build) {
+		return fmt.Errorf("%s has a RAM snapshot taken with %s; the current QEMU is %s, and a snapshot restores only into the build that wrote it: pvm qemu use %s, or drop it: pvm snapshot rm %s", m.Name, m.QEMUBuild, tc.Build, m.QEMUBuild.ID, m.Name)
+	}
+	if m.QEMUArgs != nil && tc != nil {
+		cfg := *c
+		args, err := BuildArgs(tc, &cfg)
+		if err != nil {
+			return err
+		}
+		if now := CPUArgs(args); !slices.Equal(now, m.QEMUArgs) {
+			return fmt.Errorf("%s has a RAM snapshot taken with %s; it restores only into those CPU arguments, not %s: drop it with pvm snapshot rm %s", m.Name, strings.Join(m.QEMUArgs, " "), strings.Join(now, " "), m.Name)
+		}
 	}
 	return nil
+}
+
+// CPUArgs is the part of an argv that a migration stream depends on: the
+// accelerator, machine and CPU model, and -no-reboot.
+func CPUArgs(argv []string) []string {
+	var out []string
+	for i, a := range argv {
+		switch a {
+		case "-accel", "-machine", "-cpu":
+			if i+1 < len(argv) {
+				out = append(out, a, argv[i+1])
+			}
+		case "-no-reboot":
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // selfExe resolves the running pvm binary for migration helpers.
@@ -143,10 +178,22 @@ func (in *Instance) CreateSnapshot(vmDir, pvmVersion string) (retErr error) {
 	if st == nil {
 		return fmt.Errorf("vm %s is not running", in.Cfg.Name)
 	}
-	sp := SnapPaths(vmDir)
 	if err := CheckSnapshotCreate(vmDir); err != nil {
 		return err
 	}
+	if err := in.needToolchain(); err != nil {
+		return err
+	}
+	if st.Accel == AccelWHPX {
+		return fmt.Errorf("native Windows has no RAM snapshots: QEMU blocks migration of WHPX VMs (missing dirty memory tracking support); use the WSL2 backend for snapshots")
+	}
+	if st.QEMUBuild == nil {
+		return fmt.Errorf("%s was started by a pvm older than v1.4.0; restart it first (pvm stop %s && pvm start %s), then snapshot", in.Cfg.Name, in.Cfg.Name, in.Cfg.Name)
+	}
+	if in.Toolchain != nil && in.Toolchain.Build != nil && !st.QEMUBuild.Same(in.Toolchain.Build) {
+		return fmt.Errorf("%s runs on %s, not on the QEMU build it would snapshot with (%s), because its QEMU changed since it started; restart %s first, then snapshot", in.Cfg.Name, st.QEMUBuild, in.Toolchain.Build, in.Cfg.Name)
+	}
+	sp := SnapPaths(vmDir)
 
 	q, err := DialQMP(in.Cfg.QMPSock)
 	if err != nil {
@@ -266,17 +313,18 @@ func (in *Instance) CreateSnapshot(vmDir, pvmVersion string) (retErr error) {
 	}
 
 	m := &SnapshotManifest{
-		Name:        in.Cfg.Name,
-		Arch:        native.Arch,
-		CPUs:        in.Cfg.CPUs,
-		MemMB:       in.Cfg.MemMB,
-		Accel:       st.Accel,
-		GPU:         in.Cfg.GPU,
-		Balloon:     in.Cfg.Balloon,
-		Stream:      slices.Contains(st.Args, StreamPortDevice),
-		QEMUVersion: in.Toolchain.versionString(),
-		PVMVersion:  pvmVersion,
-		CreatedAt:   time.Now(),
+		Name:       in.Cfg.Name,
+		Arch:       native.Arch,
+		CPUs:       in.Cfg.CPUs,
+		MemMB:      in.Cfg.MemMB,
+		Accel:      st.Accel,
+		GPU:        in.Cfg.GPU,
+		Balloon:    in.Cfg.Balloon,
+		Stream:     slices.Contains(st.Args, StreamPortDevice),
+		QEMUBuild:  st.QEMUBuild,
+		QEMUArgs:   CPUArgs(st.Args),
+		PVMVersion: pvmVersion,
+		CreatedAt:  time.Now(),
 	}
 	if err := m.save(vmDir); err != nil {
 		return err
@@ -304,13 +352,6 @@ func waitMigrate(q *QMP, memMB int) error {
 	return fmt.Errorf("migration timed out after %ds", timeout)
 }
 
-func (t *Toolchain) versionString() string {
-	if t == nil || t.Version == [3]int{} {
-		return "unknown"
-	}
-	return fmt.Sprintf("%d.%d.%d", t.Version[0], t.Version[1], t.Version[2])
-}
-
 // PrepareRestore rewires the instance to boot from the snapshot: fresh
 // overlay on the snap base and -incoming on the RAM stream. Returns nil
 // (no restore needed) when there is no unconsumed snapshot.
@@ -322,11 +363,11 @@ func (in *Instance) PrepareRestore(vmDir string) (*SnapshotManifest, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := m.checkMatch(&in.Cfg, in.Toolchain.versionString()); err != nil {
+	if err := in.needToolchain(); err != nil {
 		return nil, err
 	}
-	if in.Toolchain != nil && in.Toolchain.BrokenLiveRestore(in.Cfg.Accel) {
-		return nil, fmt.Errorf("qemu 11.0.0 has an hvf/arm64 live-restore regression; upgrade QEMU to >= 11.1.0 (brew upgrade qemu) or use the bundled runtime")
+	if err := m.checkMatch(&in.Cfg, in.Toolchain); err != nil {
+		return nil, err
 	}
 	sp := SnapPaths(vmDir)
 	if _, err := os.Stat(sp.RAM); err != nil {

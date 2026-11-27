@@ -23,3 +23,5 @@ func HostMemMB() int {
 	}
 	return 8192
 }
+
+func smallECAM() bool { return false }

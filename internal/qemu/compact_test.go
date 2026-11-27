@@ -22,7 +22,9 @@ func requireCompactTools(t *testing.T) (string, string, [3]int) {
 	if err != nil {
 		t.Skip("qemu-system not installed")
 	}
-	return img, io, probeVersion(system)
+	out, _ := exec.Command(system, "--version").Output()
+	v, _ := parseVersion(string(out))
+	return img, io, v
 }
 
 func runCompactTool(t *testing.T, name string, args ...string) {

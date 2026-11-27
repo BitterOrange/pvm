@@ -6,8 +6,7 @@ import (
 )
 
 func TestBuildArgsWithoutVirtio9p(t *testing.T) {
-	unsupported := false
-	tc := &Toolchain{System: "qemu-test", FirmwareDir: "/fw", has9p: &unsupported}
+	tc := &Toolchain{System: "qemu-test", FirmwareDir: "/fw", Build: &BuildIdentity{ID: "t"}, Caps: Caps{Virtio9p: false}}
 	cfg := testCfg(AccelTCG)
 	if _, err := BuildArgs(tc, cfg); err == nil || !strings.Contains(err.Error(), "--share none") {
 		t.Fatalf("default share must fail explicitly without 9p: %v", err)

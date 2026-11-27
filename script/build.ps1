@@ -16,6 +16,5 @@ if (-not (Test-Path $bash)) {
     exit 1
 }
 
-if (-not $env:PVM_PACK_QEMU) { $env:PVM_PACK_QEMU = '0' }
 & $bash (Join-Path $PSScriptRoot 'build.sh') @args
 exit $LASTEXITCODE

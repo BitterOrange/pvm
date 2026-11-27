@@ -27,11 +27,12 @@ Shipped:
 - [x] Renderer CPUs for Chromium apps; input method text through ibus, with candidates at the text cursor on Windows; less CPU for sound, silence not sent, and a microphone that follows headsets (v1.3.4)
 - [x] The keyring as a setting, `off` or `host` (encrypted, unlocked from the host); window scale per VM; app settings that apply to open windows at once; no focus ring after clicks in Electron apps (v1.3.5)
 - [x] PVM Desktop: terminal, app and file manager on a stopped VM ask to start it first and open once it is ready; app settings in groups, all in view (v1.3.6)
+- [x] `pvm qemu`: pvm-qemu builds pinned by digest or the platform's official QEMU, a daemon that runs without QEMU, the PVM Desktop QEMU page; the gateway boots on M1 Macs (v1.4.0)
 
 Planned:
 
 - [ ] The full name: Proxied Virtual Machine (PVM), to be agreed upstream
-- [ ] QEMU outside the installers: a build of the new pvm-qemu project from signed upstream source, or the platform's official QEMU, chosen with `pvm qemu` ([plan](docs/design/qemu.md))
+- [ ] QEMU outside the installers, step two: installers without QEMU and an `install.sh` that runs `pvm qemu install` (v1.4.1; [plan](docs/design/qemu.md))
 - [ ] WHPX: AVX in VMs, and a QEMU chosen per VM (a pvm-qemu build or the platform's official one)
 - [ ] `pvm app`: host-to-guest clipboard on macOS and Linux, WSL2, and input method text in programs without ibus
 - [ ] `pvm desktop` as a host window like `pvm app`, opening the workspace folder in the VM's file manager
@@ -64,10 +65,11 @@ pvm runs on macOS on arm64, Linux on amd64, and Windows on amd64.
 2. Run it. No administrator rights are needed.
 3. Open a new terminal, so the `PATH` change applies, and run `pvm doctor` to check acceleration and the backend. Or open **PVM Desktop** from the Start menu; see [PVM Desktop](#pvm-desktop).
 
-Both installers put `pvm.exe` and `pvm-desktop.exe` in `%LOCALAPPDATA%\pvm`, add that folder to the user `PATH`, add a "PVM Desktop" shortcut to your Start menu, install the Xpra client to `%LOCALAPPDATA%\pvm\xpra`, and install the QEMU runtime to `%USERPROFILE%\.pvm\runtime\qemu\x86_64`, or under `PVM_HOME` when it is set. Use one installer type per machine. `pvm upgrade` updates `pvm.exe` and the QEMU runtime of either; it does not update `pvm-desktop.exe`, so run the new installer to update the app.
+Both installers put `pvm.exe` and `pvm-desktop.exe` in `%LOCALAPPDATA%\pvm`, add that folder to the user `PATH`, add a "PVM Desktop" shortcut to your Start menu, install the Xpra client to `%LOCALAPPDATA%\pvm\xpra`, and place the pinned [pvm-qemu build](#qemu) under `%USERPROFILE%\.pvm\runtime\qemu` (or under `PVM_HOME` when it is set), which pvm takes over into `runtime\qemu\builds` the first time its daemon starts. Use one installer type per machine. `pvm upgrade` updates only `pvm.exe`; it changes neither QEMU nor `pvm-desktop.exe`, so run the new installer to update the app. Uninstalling keeps the QEMU builds under `runtime\qemu\builds` together with your VMs.
 
 - The last page of the `.exe` installer offers "Open PVM Desktop", off by default. The MSI has no such page.
 - Files in use by a running pvm, VM or PVM Desktop cannot be replaced. Interactive runs offer to close PVM Desktop and stop the daemon, which also stops running VMs; silent runs (`/S`, `msiexec /qn`) refuse, so close PVM Desktop and run `pvm daemon stop` first.
+- Stay with the installer you started with: the `.exe` refuses to run over an MSI install and the MSI over an `.exe` install. To switch, uninstall in Settings > Apps first; your VMs are kept.
 - Silent MSI install: `msiexec /i pvm_windows_amd64_setup.msi /qn`. Pass `PVMHOME=D:\pvm-home` to choose the data location; upgrades and uninstalls reuse it.
 - Uninstalling from Settings > Apps removes pvm, PVM Desktop with its Start menu shortcut and its "open at login" entry, the runtime, the Xpra client and the `PATH` entry. VM disks, keys and configuration under `~/.pvm` are kept.
 
@@ -85,9 +87,9 @@ Both installers put `pvm.exe` and `pvm-desktop.exe` in `%LOCALAPPDATA%\pvm`, add
 
 Windows has two backends, chosen with `PVM_BACKEND` or `backend` in `~/.pvm/config.yaml`:
 
-- `native`: the Windows daemon runs Windows QEMU directly, with WHPX when Windows Hypervisor Platform is enabled. Windows QEMU has no virtio-9p, so `/share` is off; use [workspaces](#workspaces) for host folders.
+- `native`: the Windows daemon runs Windows QEMU directly, with WHPX when Windows Hypervisor Platform is enabled. No QEMU for Windows has virtio-9p (neither the pvm-qemu build nor MSYS2's), so `/share` is off; use [workspaces](#workspaces) for host folders.
 - `wsl`: commands go to `pvm` inside WSL2, with full `/share`, extra mounts and KVM where available.
-- `auto` (default): a running native daemon or native QEMU first, otherwise WSL2 when pvm is installed there.
+- `auto` (default): native when a native daemon runs or a native QEMU build is set up, otherwise WSL2 when pvm is installed there, otherwise native. To set up native QEMU while `auto` picks WSL2, run `PVM_BACKEND=native pvm qemu install`, or use the QEMU page of PVM Desktop.
 
 Acceleration, DNS and WSL2 nested virtualization settings are in [SKILL.md](SKILL.md).
 
@@ -195,7 +197,7 @@ Uploads skip `.gitignore` matches and `node_modules`; a `.pvmignore` file adds o
 
 ### Windows installers
 
-Releases ship `pvm_windows_amd64_setup.exe` and `pvm_windows_amd64_setup.msi`: per-user installers that need no administrator rights and bring pvm, PVM Desktop, the bundled QEMU runtime and the Xpra client for `pvm app` in one step. They detect a running pvm before replacing files and keep your VMs on uninstall. See [Installation on Windows](#windows).
+Releases ship `pvm_windows_amd64_setup.exe` and `pvm_windows_amd64_setup.msi`: per-user installers that need no administrator rights and bring pvm, PVM Desktop, the pinned pvm-qemu build and the Xpra client for `pvm app` in one step. They detect a running pvm before replacing files and keep your VMs on uninstall. See [Installation on Windows](#windows).
 
 ### PVM Desktop
 
@@ -222,6 +224,25 @@ The host `pvm` binary provides the CLI and daemon, and also runs as the VPS exit
 Control: pvm CLI -> pvm daemon -> gateway VM and dev VMs
 Data:    dev VM -> gateway VM -> WireGuard tunnel -> exit-agent on VPS or Cloudflare WARP -> Internet
 ```
+
+## QEMU
+
+pvm runs QEMU only from the build you select with `pvm qemu`, by absolute path; it never searches PATH and never switches builds by itself. Builds sit side by side under `~/.pvm/runtime/qemu/builds`, and one is the default. There are two sources:
+
+- **Project build**: QEMU built from the signed upstream source by the [pvm-qemu](https://github.com/BitterOrange/pvm-qemu) project, with the complete source in each release. pvm installs an archive only when its SHA-256 matches a digest pinned in the pvm release; no administrator rights or `gh` are needed. These are not official QEMU releases, and pvm-qemu is not affiliated with the QEMU project.
+- **Official build**: your platform's own QEMU, installed by you: Homebrew on macOS (`brew install qemu`), your distribution's packages on Linux (8.2 or newer, for example `sudo apt install qemu-system-x86 qemu-utils`), and MSYS2 UCRT64 on Windows (`pacman -S mingw-w64-ucrt-x86_64-qemu`), which qemu.org links to.
+
+```bash
+pvm qemu                                # builds, default, recommended pin and leftovers
+pvm qemu install -y                     # the recommended project build
+pvm qemu install --file pvm-qemu-11.1.3-pvm1-linux-amd64.tar.gz -y   # offline, from a downloaded archive
+pvm qemu use official                   # Homebrew, your distribution or MSYS2
+pvm qemu check --default                # exit 0 ok, 3 not set up, 1 failing
+pvm qemu rm 11.1.3-pvm1 -y              # remove a build that is not the default
+pvm qemu gc -y                          # remove folders left by older pvm versions
+```
+
+Every build passes a minimum version, accelerator and device probes, a test start with pvm's own arguments and a firmware check (on macOS also the hypervisor entitlement) before first use and whenever its binary changes; a project build whose files changed is refused. Downloads honour `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` and resume after interruptions. The daemon runs without QEMU and picks up `pvm qemu install` or `use` without a restart; until then, creating or starting VMs fails with the commands to run. RAM snapshots restore only into the build that wrote them. The QEMU an older pvm installed is taken over as a project build when it matches a pinned build; any other old folder is left for `pvm qemu gc`.
 
 ## Supported images and hosts
 
@@ -259,7 +280,7 @@ This creates a new client key, enrolls it with the exit agent, writes the config
 - [SKILL.md](SKILL.md): Complete usage manual for agents and people; `pvm skill` prints the embedded copy.
 - [SECURITY.md](SECURITY.md): Host/guest trust boundaries, credentials, image provenance, and network verification; `pvm security` prints the embedded copy.
 - [AGENTS.md](AGENTS.md): Repository map, build and test workflow, and development rules.
-- `pvm upgrade` verifies the release, saves a recovery point, upgrades the installed binary and bundled QEMU runtime, restarts a running daemon, and attempts to restore every previously running user VM. Use `--no-restart` to replace only the binary and runtime, or `pvm upgrade --rollback` to restore the saved binary, QEMU runtime, and VM recovery plan. On Windows, `--no-restart` requires no running VMs when QEMU is included; omit it so pvm can stop the daemon before replacing the runtime and restore the VM plan afterwards. Set `PVM_SKIP_QEMU=1` to upgrade only pvm.
+- `pvm upgrade` verifies the release, checks that the new version accepts your default QEMU build, saves a recovery point, replaces the installed binary, restarts a running daemon, and attempts to restore every previously running user VM. It never changes QEMU or PVM Desktop. Use `--no-restart` to replace only the binary (then run `pvm daemon restart`), or `pvm upgrade --rollback` to restore the saved binary and VM recovery plan. `--to` refuses versions below v1.4.0; use `--rollback` or that version's installer.
 - `pvm audit dev1 --privacy`, `pvm doctor`, and `pvm route explain dev1 example.com` inspect local configuration without starting a daemon or making network probes; their output redacts identifying values.
 - Automatic update checks are off by default. Set `update_check: true` in `~/.pvm/config.yaml` or `PVM_UPDATE_CHECK=1` to opt in; `PVM_NO_UPDATE_CHECK=1` disables them.
 - For independently trusted image signing keys, use `pvm image fetch ubuntu:26.04 --keyring /trusted/ubuntu-cloudimage.gpg`. This requires `gpgv`; pvm does not download or trust keys automatically.
@@ -274,7 +295,7 @@ go install mvdan.cc/garble@v0.18.0
 go test ./...
 ```
 
-On Windows, install Git for Windows, Go 1.27.4 and garble v0.18.0, then run the wrapper from PowerShell. It runs `script/build.sh` through Git Bash and writes `pvm.exe`. Bundled QEMU is not packed on Windows (`script/qemu/pack-windows-runtime.sh` builds that runtime separately), so the wrapper defaults to `PVM_PACK_QEMU=0` and the runtime already installed under `~/.pvm/runtime` keeps being used.
+On Windows, install Git for Windows, Go 1.27.4 and garble v0.18.0, then run the wrapper from PowerShell. It runs `script/build.sh` through Git Bash and writes `pvm.exe`. No build includes QEMU: set one up with `pvm qemu install` or `pvm qemu use official`.
 
 ```powershell
 go install mvdan.cc/garble@v0.18.0
@@ -286,6 +307,6 @@ go install mvdan.cc/garble@v0.18.0
 
 Do not run the full `go test ./...` on a Windows host. The test suite is written for Unix (file permission bits, paths such as `/tmp`, symlinks, and tools like `ip`, `gh` and `bash`), so many tests fail there for reasons unrelated to your change, and the `internal/cli` tests keep respawning themselves and leave `cli.test.exe` processes behind. On Windows, run only targeted tests for what you changed, for example `go test ./internal/qemu -run Accel`, and rely on Linux or macOS (CI or WSL2) for the full suite.
 
-CI tests and builds each native platform once per commit, caches Go and build tools, and reserves QEMU packaging and signing for releases. Releases can reuse verified artifacts from a successful master run of the exact same commit. Linux namespace tests must run rather than skip.
+CI tests and builds each native platform once per commit, caches Go and build tools, and checks the pinned pvm-qemu builds against their releases and attestations. This repository does not build or pack QEMU. Releases can reuse verified artifacts from a successful master run of the exact same commit. Linux namespace tests must run rather than skip.
 
 Security boundaries: user VMs share a layer-2 network; global shares and extra host mounts are explicit trust boundaries. They are not isolated hostile tenants. Explicit direct/internal rules can bypass a default exit. See [SECURITY.md](SECURITY.md) for guarantees, limitations, and deployment checks.

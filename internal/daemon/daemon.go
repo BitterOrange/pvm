@@ -34,10 +34,16 @@ import (
 )
 
 type Server struct {
-	P     *paths.Paths
-	Cfg   *config.Config
+	P   *paths.Paths
+	Cfg *config.Config
+	// TC and Accel fix the toolchain (tests). In the daemon they are nil,
+	// and each use resolves the selected QEMU build through qsel.
 	TC    *qemu.Toolchain
 	Accel qemu.Accel
+	qsel  qemuSelect
+
+	blockedMu sync.Mutex
+	blocked   map[int]string // cluster id -> why it waits for a usable QEMU
 
 	Clusters *cluster.Store
 	relays   *relaySet
@@ -196,13 +202,16 @@ func (s *Server) instance(spec *vm.Spec) *qemu.Instance {
 	if spec.Role != "gateway" && spec.ClusterID > 0 {
 		linkSock = s.Clusters.LinkSock(spec.ClusterID, spec.Name)
 	}
-	cfg := spec.QEMUConfig(s.P, s.Accel, linkSock)
+	tc, accel, err := s.qemu()
+	cfg := spec.QEMUConfig(s.P, accel, linkSock)
 	vmDir := s.P.VMDir(spec.Name)
 	cfg.DiskPath = qemu.ActiveDisk(vmDir, cfg.DiskPath)
+	// Inspecting and stopping a VM needs no QEMU; starting one returns err.
 	return &qemu.Instance{
-		Cfg:       cfg,
-		StatePath: filepath.Join(vmDir, "run.json"),
-		Toolchain: s.TC,
+		Cfg:          cfg,
+		StatePath:    filepath.Join(vmDir, "run.json"),
+		Toolchain:    tc,
+		ToolchainErr: err,
 	}
 }
 
@@ -216,6 +225,7 @@ func (s *Server) refreshSockets(spec *vm.Spec) {
 	if st, err := s.instance(spec).Running(); err != nil || st != nil {
 		return
 	}
+	s.resetGatewayVars(spec)
 	if s.P.RefreshVMSockets(spec.Name) {
 		log.Printf("vm %s: stored socket ports are no longer usable; picked new ones", spec.Name)
 	}
@@ -339,30 +349,79 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err)
 		return
 	}
+	tc, accel, qerr := s.qemu()
 	running, tcgFallback := 0, 0
+	changed := []map[string]any{}
 	for _, sp := range specs {
 		if st, err := s.instance(sp).Running(); err != nil {
 			writeErr(w, 500, fmt.Errorf("inspect VM %s: %w", sp.Name, err))
 			return
 		} else if st != nil {
 			running++
-			if st.Accel != "" && st.Accel != s.Accel {
+			if accel != "" && st.Accel != "" && st.Accel != accel {
 				tcgFallback++
+			}
+			if tc != nil && st.QEMUBuild != nil && !st.QEMUBuild.Same(tc.Build) {
+				changed = append(changed, map[string]any{"vm": sp.Name, "build": st.QEMUBuild.String()})
 			}
 		}
 	}
-	writeJSON(w, 200, map[string]any{
+	// The QEMU fields are named differently from v1.3.x's "qemu" and
+	// "bundled", so a CLI and daemon of different versions fail visibly.
+	status := map[string]any{
+		"blocked_clusters": s.blockedClusters(),
+		"qemu_changed":     changed,
+		"qemu_problems":    []string{},
+		"accel_forced":     os.Getenv("PVM_QEMU_ACCEL") != "",
+	}
+	if qerr != nil {
+		status["qemu_problems"] = []string{qerr.Error()}
+	} else if b := tc.Build; b != nil {
+		status["qemu_build"] = map[string]any{"default": b.ID, "source": b.Source, "channel": b.Channel, "version": b.Version, "label": b.Label(), "path": tc.System, "accel": accel}
+	}
+	for k, v := range map[string]any{
 		"version":      buildinfo.Version,
 		"ready":        s.ready.Load(),
 		"pid":          os.Getpid(),
 		"uptime":       time.Since(s.started).Round(time.Second).String(),
 		"vms":          len(specs),
 		"running":      running,
-		"accel":        s.Accel,
+		"accel":        accel,
 		"tcg_fallback": tcgFallback,
-		"qemu":         s.TC.System,
-		"bundled":      s.TC.Bundled,
-	})
+	} {
+		status[k] = v
+	}
+	writeJSON(w, 200, status)
+}
+
+func (s *Server) setBlocked(id int, why string) {
+	s.blockedMu.Lock()
+	defer s.blockedMu.Unlock()
+	if why == "" {
+		delete(s.blocked, id)
+		return
+	}
+	if s.blocked == nil {
+		s.blocked = map[int]string{}
+	}
+	s.blocked[id] = why
+}
+
+func (s *Server) hasBlockedClusters() bool {
+	s.blockedMu.Lock()
+	defer s.blockedMu.Unlock()
+	return len(s.blocked) > 0
+}
+
+// blockedClusters lists the clusters waiting for a usable QEMU.
+func (s *Server) blockedClusters() []map[string]any {
+	s.blockedMu.Lock()
+	defer s.blockedMu.Unlock()
+	out := []map[string]any{}
+	for id, why := range s.blocked {
+		out = append(out, map[string]any{"cluster": id, "reason": why})
+	}
+	return out
 }
 
 func (s *Server) buildVMInfo(sp *vm.Spec) (vmInfo, error) {
@@ -529,7 +588,12 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	base := filepath.Join(s.P.Images, fmt.Sprintf("%s-%s.qcow2", imageFileStem(req.Image), native.Arch))
 	goldenVer := 0
-	kernelArgs := s.Accel.GuestKernelArgs()
+	tc, accel, err := s.qemu()
+	if err != nil {
+		writeErr(w, 409, err)
+		return
+	}
+	kernelArgs := accel.GuestKernelArgs()
 	// a base image has never booted with the args; neither has a golden
 	// image sealed without them
 	argsPending := kernelArgs != ""
@@ -574,7 +638,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		SmbiosSpoof: req.SmbiosSpoof, ShareMode: req.ShareMode,
 	}
 	createStart := time.Now()
-	if err := vm.Create(s.P, s.TC, spec); err != nil {
+	if err := vm.Create(s.P, tc, spec); err != nil {
 		if lerr := s.removeVMMember(cl.ID, req.Name); lerr != nil {
 			writeErr(w, 500, fmt.Errorf("create failed (%v) and membership cleanup is incomplete (%v); retry the same create to finish", err, lerr))
 			return
@@ -1041,10 +1105,20 @@ func (s *Server) recoverClusters() {
 	healthy := true
 	for _, cl := range s.Clusters.List() {
 		if _, err := s.ensureCluster(cl.ID); err != nil {
+			// Without a usable QEMU the gateway cannot start. The cluster
+			// waits (nothing forwards its traffic, so its VMs stay cut
+			// off) without making the daemon unready: pvm ls, rm and
+			// pvm qemu still work, and the watcher retries.
+			if qemu.IsUnusable(err) {
+				s.setBlocked(cl.ID, err.Error())
+				log.Printf("recover cluster %d: blocked: %v", cl.ID, err)
+				continue
+			}
 			healthy = false
 			log.Printf("recover cluster %d: %v", cl.ID, err)
 			continue
 		}
+		s.setBlocked(cl.ID, "")
 		// Restore relays from the CURRENT store inside mapMu: a snapshot
 		// taken earlier could rebind a port whose map was just removed,
 		// and the stale relay would later forward another VM's traffic.
@@ -1177,7 +1251,11 @@ func Run(p *paths.Paths, srv *Server) error {
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- httpSrv.Serve(ln) }()
+	// The run lock is held, so no older daemon launches from the old
+	// runtime folder: take it over before recovering the clusters.
+	srv.adoptLegacyQEMU()
 	go srv.recoverClusters()
+	go srv.watchQEMU(serveCtx.Done())
 	wsMountsDone := make(chan struct{})
 	go func() {
 		srv.workspaceMounts().run(serveCtx, 5*time.Second)

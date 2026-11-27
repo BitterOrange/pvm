@@ -1,6 +1,6 @@
 // What the screens show, and the one way they change anything.
 
-import { backend, errorText, type Exit, type Settings, type State, type Task, type VM, type Workspace } from "./api";
+import { backend, errorText, type Exit, type QEMUBuild, type Settings, type State, type Task, type VM, type Workspace } from "./api";
 import { button, h } from "./dom";
 import { onLanguage, t } from "./i18n";
 import { icon } from "./icons";
@@ -16,6 +16,7 @@ export const data = {
   defaultExit: null as string | null,
   workspaces: null as Workspace[] | null,
   settings: null as Settings | null,
+  qemuBuilds: null as QEMUBuild[] | null,
   // errors holds the last failure of each list, by its key in data.
   errors: {} as Record<string, string>,
 };
@@ -56,9 +57,11 @@ const listeners: (() => void)[] = [];
 export const onChange = (f: () => void): void => void listeners.push(f);
 export const changed = (): void => listeners.forEach((f) => f());
 
-export const ready = (): boolean => data.state?.backend === "native" && data.state.daemon_healthy;
+// ready is false while the screens cannot work: under WSL2, without a
+// daemon, or before a QEMU is set up, which the daemon does not need.
+export const ready = (): boolean => data.state?.backend === "native" && data.state.daemon_healthy && data.state.qemu.ready;
 
-async function read<T>(key: "vms" | "exits" | "defaultExit" | "workspaces" | "settings", call: () => Promise<T>): Promise<void> {
+async function read<T>(key: "vms" | "exits" | "defaultExit" | "workspaces" | "settings" | "qemuBuilds", call: () => Promise<T>): Promise<void> {
   try {
     (data[key] as T | null) = await call();
     delete data.errors[key];
@@ -89,6 +92,7 @@ export function refresh(): Promise<void> {
           read("defaultExit", () => backend().DefaultExit()),
           read("workspaces", () => backend().Workspaces()),
           read("settings", () => backend().Settings()),
+          read("qemuBuilds", () => backend().QEMUBuilds()),
         ]);
       }
       changed();

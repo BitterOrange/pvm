@@ -16,6 +16,7 @@ import (
 type command struct {
 	argv []string
 	dir  string
+	env  []string // added to the app's environment
 }
 
 // runner runs pvm and reports each output line. The error is for a
@@ -53,6 +54,9 @@ func (r pvmRunner) run(c command, line func(string)) (int, error) {
 	}
 	cmd := exec.Command(path, c.argv...)
 	cmd.Dir = c.dir
+	if len(c.env) > 0 {
+		cmd.Env = append(os.Environ(), c.env...)
+	}
 	fsutil.ConfigureHiddenCmd(cmd)
 	stdout, stderr := &lineWriter{line: line}, &lineWriter{line: line}
 	cmd.Stdout, cmd.Stderr = stdout, stderr

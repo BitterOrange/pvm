@@ -5,6 +5,7 @@ import * as exits from "./exits";
 import { language, onLanguage, t } from "./i18n";
 import { icon, type IconName } from "./icons";
 import * as prefs from "./prefs";
+import * as qemu from "./qemu";
 import * as settings from "./settings";
 import { act, busy, changed, data, following, nav, onChange, readVMs, ready, refresh, toastArea } from "./store";
 import * as tasks from "./tasks";
@@ -132,6 +133,10 @@ function stopDaemonDialog(): void {
 const art = (name: IconName, kind = ""): HTMLElement =>
   h("div", { class: "state-art" + (kind === "" ? "" : " state-art--" + kind), "aria-hidden": "true" }, icon(name, "xl"));
 
+// setUpNative is true while the WSL2 page shows the QEMU page instead:
+// setting up QEMU there moves the app to the native backend.
+let setUpNative = false;
+
 // gate is the page shown in place of the screens when they cannot work.
 function gate(): HTMLElement {
   const st = data.state;
@@ -155,6 +160,15 @@ function gate(): HTMLElement {
       reason,
     );
   }
+  if (st.backend !== "native" && setUpNative) {
+    return qemu.page(true, () => {
+      setUpNative = false;
+      render(true);
+    });
+  }
+  if (st.backend === "native" && !st.qemu.ready) {
+    return qemu.page(false);
+  }
   if (st.backend !== "native") {
     return h(
       "div",
@@ -168,6 +182,10 @@ function gate(): HTMLElement {
         h("p", { class: "hint" }, t.gate.wslLead),
         h("div", { class: "cmd-list" }, command("pvm ls"), command("pvm ssh"), command("pvm --help")),
       ),
+      button(t.gate.setUpQemu, () => {
+        setUpNative = true;
+        render(true);
+      }, { icon: "cpu", key: "gate:qemu" }),
     );
   }
   const working = busy.has("daemon");

@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -53,9 +52,9 @@ func TestManifestSaveLoad(t *testing.T) {
 }
 
 func TestCheckMatch(t *testing.T) {
-	m := &SnapshotManifest{Arch: native.Arch, CPUs: 2, MemMB: 2048, Accel: AccelHVF, QEMUVersion: "11.1.2"}
+	m := &SnapshotManifest{Arch: native.Arch, CPUs: 2, MemMB: 2048, Accel: AccelHVF, QEMUBuild: testBuild}
 	ok := &VMConfig{CPUs: 2, MemMB: 2048, Accel: AccelHVF}
-	if err := m.checkMatch(ok, "11.1.2"); err != nil {
+	if err := m.checkMatch(ok, testTC); err != nil {
 		t.Fatalf("identical config should match: %v", err)
 	}
 	cases := []VMConfig{
@@ -63,20 +62,20 @@ func TestCheckMatch(t *testing.T) {
 		{CPUs: 2, MemMB: 4096, Accel: AccelHVF},
 	}
 	for i := range cases {
-		if err := m.checkMatch(&cases[i], "11.1.2"); err == nil {
+		if err := m.checkMatch(&cases[i], testTC); err == nil {
 			t.Fatalf("case %d: expected mismatch error", i)
 		}
 	}
 	m.Arch = "incompatible"
-	if err := m.checkMatch(ok, "11.1.2"); err == nil {
+	if err := m.checkMatch(ok, testTC); err == nil {
 		t.Fatal("incompatible snapshot architecture must be rejected")
 	}
 }
 
 func TestCheckMatchAccelFallback(t *testing.T) {
-	m := &SnapshotManifest{Arch: native.Arch, CPUs: 2, MemMB: 2048, Accel: AccelHVF, QEMUVersion: "11.1.2"}
+	m := &SnapshotManifest{Arch: native.Arch, CPUs: 2, MemMB: 2048, Accel: AccelHVF, QEMUBuild: testBuild}
 	c := &VMConfig{CPUs: 2, MemMB: 2048, Accel: AccelTCG}
-	if err := m.checkMatch(c, "11.1.2"); err != nil {
+	if err := m.checkMatch(c, testTC); err != nil {
 		t.Fatalf("hvf snapshot must be restorable on tcg host: %v", err)
 	}
 	if c.Accel != m.Accel {
@@ -84,28 +83,46 @@ func TestCheckMatchAccelFallback(t *testing.T) {
 	}
 	m.Accel = AccelTCG
 	c.Accel = AccelHVF
-	if err := m.checkMatch(c, "11.1.2"); err == nil {
+	if err := m.checkMatch(c, testTC); err == nil {
 		t.Fatal("tcg snapshot on hvf host must remain incompatible")
 	}
 }
 
 func TestCheckMatchGPUOverride(t *testing.T) {
-	m := &SnapshotManifest{Arch: native.Arch, CPUs: 2, MemMB: 2048, Accel: AccelHVF, GPU: true, QEMUVersion: "11.1.2"}
+	m := &SnapshotManifest{Arch: native.Arch, CPUs: 2, MemMB: 2048, Accel: AccelHVF, GPU: true, QEMUBuild: testBuild}
 	c := &VMConfig{CPUs: 2, MemMB: 2048, Accel: AccelHVF, GPU: true}
-	if err := m.checkMatch(c, "11.1.2"); err != nil {
+	if err := m.checkMatch(c, testTC); err != nil {
 		t.Fatal(err)
 	}
 	m.GPU = false
-	if err := m.checkMatch(c, "11.1.2"); err == nil {
+	if err := m.checkMatch(c, testTC); err == nil {
 		t.Fatal("gpu layout mismatch must refuse the heterogeneous restore")
 	}
 	m.GPU, m.Balloon = true, true
-	if err := m.checkMatch(c, "11.1.2"); err == nil {
+	if err := m.checkMatch(c, testTC); err == nil {
 		t.Fatal("balloon layout mismatch must refuse the heterogeneous restore")
 	}
 	m.Balloon = false
-	if err := m.checkMatch(c, "11.2.0"); err == nil {
-		t.Fatal("qemu version drift must refuse the restore")
+	other := &Toolchain{Build: &BuildIdentity{ID: "11.1.3-pvm2", SystemSHA256: "bb"}}
+	if err := m.checkMatch(c, other); err == nil || !strings.Contains(err.Error(), "restores only into the build") {
+		t.Fatalf("another build must refuse the restore: %v", err)
+	}
+	m.QEMUBuild = nil
+	if err := m.checkMatch(c, testTC); err == nil || !strings.Contains(err.Error(), "before pvm v1.4.0") {
+		t.Fatalf("a pre-1.4 snapshot must be refused with the rollback route: %v", err)
+	}
+}
+
+var (
+	testBuild = &BuildIdentity{ID: "11.1.3-pvm1", Source: SourceProject, Version: "11.1.3", SystemSHA256: "aa"}
+	testTC    = &Toolchain{Build: testBuild}
+)
+
+func TestCPUArgs(t *testing.T) {
+	argv := []string{"qemu", "-machine", "q35", "-accel", "whpx,kernel-irqchip=off", "-machine", "vmport=off", "-cpu", "host,-xsave", "-no-reboot", "-m", "512"}
+	want := []string{"-machine", "q35", "-accel", "whpx,kernel-irqchip=off", "-machine", "vmport=off", "-cpu", "host,-xsave", "-no-reboot"}
+	if got := CPUArgs(argv); strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("CPUArgs = %v, want %v", got, want)
 	}
 }
 
@@ -161,41 +178,12 @@ func TestRemoveSnapshot(t *testing.T) {
 	}
 }
 
-func TestBrokenLiveRestore(t *testing.T) {
-	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
-		t.Skip("HVF live-restore regression only exists on darwin/arm64")
-	}
-	tc := &Toolchain{Version: [3]int{11, 0, 0}}
-	if !tc.BrokenLiveRestore(AccelHVF) {
-		t.Fatal("qemu 11.0.0 + arm64 + hvf must be flagged broken")
-	}
-	if tc.BrokenLiveRestore(AccelKVM) {
-		t.Fatal("non-hvf must not be flagged")
-	}
-	for _, v := range [][3]int{{10, 0, 3}, {11, 0, 1}, {11, 1, 0}, {11, 1, 2}, {12, 0, 0}} {
-		tc.Version = v
-		if tc.BrokenLiveRestore(AccelHVF) {
-			t.Fatalf("qemu %v should not be flagged", v)
-		}
-	}
-	// Bundled runtimes are pvm's own known-good builds: never flagged.
-	tc = &Toolchain{Version: [3]int{11, 0, 0}, Bundled: true}
-	if tc.BrokenLiveRestore(AccelHVF) {
-		t.Fatal("bundled runtime must be exempt")
-	}
-}
-
-func TestDetectBundledTrustsHVF(t *testing.T) {
-	// A bundled toolchain is trusted without a trial boot: pointing it
-	// at a nonexistent binary (probe would fail) must still yield hvf.
-	tc := &Toolchain{System: "/nonexistent/qemu-system-aarch64", Bundled: true}
-	if got := Detect(tc, "darwin"); got != AccelHVF {
-		t.Fatalf("bundled darwin: want hvf without probe, got %s", got)
-	}
-	// Non-bundled with an unbootable binary still falls back to tcg.
-	tc.Bundled = false
+func TestDetectProbesHVF(t *testing.T) {
+	// No build is trusted for HVF by where it lives: a binary that cannot
+	// start falls back to tcg.
+	tc := &Toolchain{System: "/nonexistent/qemu-system-aarch64"}
 	if got := Detect(tc, "darwin"); got != AccelTCG {
-		t.Fatalf("system qemu with dead binary: want tcg fallback, got %s", got)
+		t.Fatalf("dead binary: want tcg fallback, got %s", got)
 	}
 }
 
@@ -270,7 +258,7 @@ func TestSnapshotReattachesSharesAfterPartialDetach(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := json.Marshal(RunState{PID: id.PID, Ident: id})
+	state, err := json.Marshal(RunState{PID: id.PID, Ident: id, QEMUBuild: testBuild})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +266,7 @@ func TestSnapshotReattachesSharesAfterPartialDetach(t *testing.T) {
 	if err := os.WriteFile(statePath, state, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	in := &Instance{StatePath: statePath, Cfg: VMConfig{QMPSock: sock, ExtraMounts: []Mount{{Tag: "pvm0"}}}}
+	in := &Instance{StatePath: statePath, Toolchain: testTC, Cfg: VMConfig{QMPSock: sock, ExtraMounts: []Mount{{Tag: "pvm0"}}}}
 	if err := in.CreateSnapshot(dir, "test"); err == nil {
 		t.Fatal("expected partial detach failure")
 	}
@@ -305,9 +293,9 @@ func TestSnapshotReattachesSharesAfterPartialDetach(t *testing.T) {
 func TestPrepareRestorePreservesExistingBackup(t *testing.T) {
 	dir := t.TempDir()
 	sp := SnapPaths(dir)
-	tc := &Toolchain{Version: [3]int{11, 1, 2}, Bundled: true}
+	tc := &Toolchain{Version: [3]int{11, 1, 2}, Build: testBuild}
 	cfg := VMConfig{CPUs: 2, MemMB: 2048, Accel: AccelTCG}
-	m := &SnapshotManifest{Arch: native.Arch, CPUs: 2, MemMB: 2048, Accel: AccelTCG, QEMUVersion: tc.versionString()}
+	m := &SnapshotManifest{Arch: native.Arch, CPUs: 2, MemMB: 2048, Accel: AccelTCG, QEMUBuild: testBuild}
 	if err := m.save(dir); err != nil {
 		t.Fatal(err)
 	}
@@ -395,9 +383,9 @@ func TestCaptureSnapshotDiskPreservesBacking(t *testing.T) {
 // it: migration needs the same device set.
 func TestManifestStreamPortMatch(t *testing.T) {
 	base := func() *VMConfig { return &VMConfig{CPUs: 1, MemMB: 128, StreamSock: "tcp:127.0.0.1:45004"} }
-	m := &SnapshotManifest{Arch: native.Arch, CPUs: 1, MemMB: 128, QEMUVersion: "11.1.0"}
+	m := &SnapshotManifest{Arch: native.Arch, CPUs: 1, MemMB: 128, QEMUBuild: testBuild}
 	c := base()
-	if err := m.checkMatch(c, "11.1.0"); err != nil {
+	if err := m.checkMatch(c, testTC); err != nil {
 		t.Fatal(err)
 	}
 	if c.StreamSock != "" {
@@ -405,12 +393,12 @@ func TestManifestStreamPortMatch(t *testing.T) {
 	}
 	m.Stream = true
 	c = base()
-	if err := m.checkMatch(c, "11.1.0"); err != nil || c.StreamSock == "" {
+	if err := m.checkMatch(c, testTC); err != nil || c.StreamSock == "" {
 		t.Errorf("snapshot with the port: %v, stream %q", err, c.StreamSock)
 	}
 	c = base()
 	c.StreamSock = ""
-	if err := m.checkMatch(c, "11.1.0"); err == nil {
+	if err := m.checkMatch(c, testTC); err == nil {
 		t.Error("snapshot with the port restored into a config without it")
 	}
 }

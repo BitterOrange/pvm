@@ -37,7 +37,19 @@ ShowUninstDetails show
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
 
+Var PvmHome
 Var RuntimeRoot
+
+; The MSI installs into the same folder; mixing the two leaves two entries
+; in Apps, and removing either one breaks the other.
+Function .onInit
+  ReadRegStr $0 HKCU "Software\pvm\msi" "PvmHome"
+  ${If} $0 != ""
+    MessageBox MB_ICONSTOP "pvm was installed with the .msi installer. Uninstall it in Settings > Apps first (your VMs are kept), then run this setup again, or update with the .msi." /SD IDOK
+    SetErrorLevel 1
+    Abort
+  ${EndIf}
+FunctionEnd
 
 ; Files under a running daemon, VM or PVM Desktop cannot be replaced.
 ; pvm-running.ps1 finds them by path; interactively it offers to close the app
@@ -52,7 +64,7 @@ Function ${un}EnsureStopped
     StrCpy $3 "check"
   ${EndIf}
   DetailPrint "Checking for a running pvm..."
-  nsExec::ExecToLog 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\pvm-running.ps1" -InstallDir "$INSTDIR" -RuntimeDir "$RuntimeRoot\x86_64" -Mode $3'
+  nsExec::ExecToLog 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\pvm-running.ps1" -InstallDir "$INSTDIR" -PvmHome "$PvmHome" -Mode $3'
   Pop $1
   ${If} $1 != 0
     Abort "pvm, its VMs or PVM Desktop are still running; close PVM Desktop, run 'pvm daemon stop' and start setup again"
@@ -97,11 +109,13 @@ FunctionEnd
 !macroend
 
 Section "pvm"
-  ReadEnvStr $RuntimeRoot PVM_HOME
-  ${If} $RuntimeRoot == ""
-    StrCpy $RuntimeRoot "$PROFILE\.pvm"
+  ReadEnvStr $PvmHome PVM_HOME
+  ${If} $PvmHome == ""
+    StrCpy $PvmHome "$PROFILE\.pvm"
   ${EndIf}
-  StrCpy $RuntimeRoot "$RuntimeRoot\runtime\qemu"
+  ; The pinned pvm-qemu build goes into the folder pvm v1.3.x used; pvm
+  ; takes it over into runtime\qemu\builds when its daemon next starts.
+  StrCpy $RuntimeRoot "$PvmHome\runtime\qemu"
 
   Call EnsureStopped
 
@@ -268,6 +282,7 @@ Section "pvm"
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "${UNINST_KEY}" "RuntimeRoot" "$RuntimeRoot"
+  WriteRegStr HKCU "${UNINST_KEY}" "PvmHome" "$PvmHome"
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\pvm.exe"
   WriteRegStr HKCU "${UNINST_KEY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
   WriteRegStr HKCU "${UNINST_KEY}" "QuietUninstallString" '"$INSTDIR\uninstall.exe" /S'
@@ -286,6 +301,10 @@ SectionEnd
 ; stay.
 Section "Uninstall"
   ReadRegStr $RuntimeRoot HKCU "${UNINST_KEY}" "RuntimeRoot"
+  ReadRegStr $PvmHome HKCU "${UNINST_KEY}" "PvmHome"
+  ${If} $PvmHome == ""
+    Abort "the pvm data folder is not recorded; run the pvm installer again, then uninstall"
+  ${EndIf}
   Call un.EnsureStopped
 
   ${If} $RuntimeRoot != ""

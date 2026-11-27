@@ -121,7 +121,16 @@ func (s *Server) handleClone(w http.ResponseWriter, r *http.Request) {
 		return nil
 	}
 
-	created, err = vm.CloneDisk(s.P, s.TC, src, spec)
+	tc, _, qerr := s.qemu()
+	if qerr != nil {
+		if cerr := cleanup(); cerr != nil {
+			writeErr(w, 500, fmt.Errorf("clone needs QEMU (%v) and %v", qerr, cerr))
+			return
+		}
+		writeErr(w, 409, qerr)
+		return
+	}
+	created, err = vm.CloneDisk(s.P, tc, src, spec)
 	if err != nil {
 		if cerr := cleanup(); cerr != nil {
 			writeErr(w, 500, fmt.Errorf("clone failed (%v) and %v", err, cerr))
