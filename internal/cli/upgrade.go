@@ -213,7 +213,7 @@ func CmdUpgrade(args []string) int {
 		fmt.Printf("upgraded to %s; daemon was not running; rollback: pvm upgrade --rollback -y\n", tag)
 		return 0
 	}
-	if err := restoreUpgradeVMs(running, func() int { return CmdDaemon([]string{"restart"}) }, func(name string) int { return CmdStart([]string{name}) }); err != nil {
+	if err := restoreUpgradeVMs(running, restartDaemonOnly, func(name string) int { return CmdStart([]string{name}) }); err != nil {
 		return fatalf("upgraded to %s but %v; run `pvm upgrade --rollback -y` to restore the saved binary and VM list", tag, err)
 	}
 	fmt.Printf("upgraded to %s; daemon restarted and running VMs restored; rollback: pvm upgrade --rollback -y\n", tag)
@@ -437,7 +437,7 @@ func rollbackUpgrade(exe string, noRestart, yes bool) int {
 		return fatalf("binary restored but QEMU rollback failed: %v; retry `pvm upgrade --rollback -y`", err)
 	}
 	if !noRestart && state.DaemonRunning {
-		if err := restoreUpgradeVMs(state.Running, func() int { return CmdDaemon([]string{"restart"}) }, func(name string) int { return CmdStart([]string{name}) }); err != nil {
+		if err := restoreUpgradeVMs(state.Running, restartDaemonOnly, func(name string) int { return CmdStart([]string{name}) }); err != nil {
 			return fatalf("binary restored but %v; retry `pvm upgrade --rollback -y`", err)
 		}
 	}
@@ -471,17 +471,30 @@ func upgradeRunningVMs() ([]string, bool, bool, error) {
 	if err := c.Get("/v1/vms", &infos); err != nil {
 		return nil, true, false, err
 	}
-	var running []string
 	anyRunning := false
 	for _, info := range infos {
-		if info.Running {
-			anyRunning = true
-			if info.Spec.Role != "gateway" {
-				running = append(running, info.Spec.Name)
-			}
+		anyRunning = anyRunning || info.Running
+	}
+	return userVMsRunning(infos), true, anyRunning, nil
+}
+
+// runningUserVMs are the user VMs the daemon runs now, gateways left out.
+func runningUserVMs(c *daemon.Client) ([]string, error) {
+	var infos []vmInfoView
+	if err := c.Get("/v1/vms", &infos); err != nil {
+		return nil, err
+	}
+	return userVMsRunning(infos), nil
+}
+
+func userVMsRunning(infos []vmInfoView) []string {
+	var running []string
+	for _, info := range infos {
+		if info.Running && info.Spec.Role != "gateway" {
+			running = append(running, info.Spec.Name)
 		}
 	}
-	return running, true, anyRunning, nil
+	return running
 }
 
 func downloadFile(client *http.Client, url, dst string) error {

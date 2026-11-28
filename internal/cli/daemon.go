@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -96,26 +97,26 @@ func CmdDaemon(args []string) int {
 		fmt.Println("daemon stopped")
 		return 0
 	case "restart":
-		os.Remove(p.DaemonStopMark())
-		c := daemon.NewClient(p)
-		if c.Healthy() {
-			if err := c.Post("/v1/shutdown?restore=1", nil, nil); err != nil {
-				return fatalf("shutdown: %v", err)
+		restore, code := restartDaemon(p)
+		if code != 0 || len(restore) == 0 {
+			if code == 0 {
+				fmt.Println("daemon restarted")
 			}
-			for i := 0; i < 900 && c.Healthy(); i++ {
-				if i > 0 && i%50 == 0 {
-					fmt.Printf("  waiting for old daemon to stop (%ds)\n", i/5)
-				}
-				time.Sleep(200 * time.Millisecond)
-			}
-			if c.Healthy() {
-				return fatalf("old daemon is still running after 180s; refusing to start a second one")
+			return code
+		}
+		// The new daemon brings these back on its own; waiting on each
+		// keeps restart from returning before they are ready.
+		fmt.Printf("daemon restarted; waiting for %s to come back\n", strings.Join(restore, ", "))
+		var failed []string
+		for _, name := range restore {
+			if CmdStart([]string{name}) != 0 {
+				failed = append(failed, name)
 			}
 		}
-		if _, err := daemon.Ensure(p); err != nil {
-			return fatalf("%v", err)
+		if len(failed) != 0 {
+			return fatalf("daemon restarted, but %s did not come back; run `pvm start %s`", strings.Join(failed, ", "), failed[0])
 		}
-		fmt.Println("daemon restarted")
+		fmt.Println("daemon restarted; running vms are back")
 		return 0
 	case "status":
 		c := daemon.NewClient(p)
@@ -224,4 +225,45 @@ func printDaemonQEMU(st map[string]any) {
 			}
 		}
 	}
+}
+
+// restartDaemon stops the daemon so that the next one restores its running
+// VMs, starts the next one, and returns the user VMs it will restore.
+func restartDaemon(p *paths.Paths) ([]string, int) {
+	os.Remove(p.DaemonStopMark())
+	c := daemon.NewClient(p)
+	var restore []string
+	if c.Healthy() {
+		var err error
+		if restore, err = runningUserVMs(c); err != nil {
+			return nil, fatalf("list vms: %v", err)
+		}
+		if err := c.Post("/v1/shutdown?restore=1", nil, nil); err != nil {
+			return nil, fatalf("shutdown: %v", err)
+		}
+		for i := 0; i < 900 && c.Healthy(); i++ {
+			if i > 0 && i%50 == 0 {
+				fmt.Printf("  waiting for old daemon to stop (%ds)\n", i/5)
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		if c.Healthy() {
+			return nil, fatalf("old daemon is still running after 180s; refusing to start a second one")
+		}
+	}
+	if _, err := daemon.Ensure(p); err != nil {
+		return nil, fatalf("%v", err)
+	}
+	return restore, 0
+}
+
+// restartDaemonOnly restarts the daemon without waiting for its VMs, for
+// callers that start each VM themselves.
+func restartDaemonOnly() int {
+	p, err := mustPaths()
+	if err != nil {
+		return fatalf("%v", err)
+	}
+	_, code := restartDaemon(p)
+	return code
 }
