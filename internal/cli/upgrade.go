@@ -2,6 +2,7 @@ package cli
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -17,6 +18,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -232,20 +234,102 @@ type upgradeRecovery struct {
 	QEMUVersion     string   `json:"qemu_version,omitempty"`
 }
 
+// attestationAPI lists a release file's attestations by digest; a test
+// points it at a local server.
+var attestationAPI = "https://api.github.com/repos/" + upgradeRepo + "/attestations"
+
+// verifyReleaseAttestation checks that path was built by this repository's
+// release workflow at tag. The attestation is public, so it is fetched
+// without a login and verified offline: gh without --bundle would need a
+// logged-in GitHub account.
 func verifyReleaseAttestation(path, tag string) error {
+	name := filepath.Base(path)
 	gh, err := exec.LookPath("gh")
 	if err != nil {
-		return fmt.Errorf("GitHub CLI (gh) with attestation support is required to verify release downloads; install it first")
+		return fmt.Errorf("GitHub CLI (gh) with attestation support is required to verify release downloads (no GitHub login is needed); install it first")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, gh, "attestation", "verify", path, "--repo", upgradeRepo,
+	bundles, err := fetchAttestationBundles(ctx, path, name)
+	if err != nil {
+		return err
+	}
+	f, err := os.CreateTemp("", "pvm-attestation-*.jsonl")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	_, werr := f.Write(bundles)
+	if err := errors.Join(werr, f.Close()); err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, gh, "attestation", "verify", path, "--bundle", f.Name(), "--repo", upgradeRepo,
 		"--signer-workflow", upgradeRepo+"/.github/workflows/build.yml", "--source-ref", "refs/tags/"+tag,
 		"--deny-self-hosted-runners", "--hostname", "github.com")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("attestation verification failed for %s: %w; check gh authentication and release provenance", filepath.Base(path), err)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("attestation verification failed for %s: %v: %s", name, err, firstLine(strings.TrimSpace(string(out))))
 	}
 	return nil
+}
+
+// fetchAttestationBundles returns path's attestation bundles from the GitHub
+// API, one JSON object per line, as gh's --bundle reads them.
+func fetchAttestationBundles(ctx context.Context, path, name string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	h := sha256.New()
+	_, err = io.Copy(h, f)
+	f.Close()
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, attestationAPI+"/sha256:"+hex.EncodeToString(h.Sum(nil)), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("cannot reach api.github.com for the attestation of %s: %w", name, err)
+	}
+	defer resp.Body.Close()
+	switch {
+	case resp.StatusCode == http.StatusOK:
+	case resp.StatusCode == http.StatusNotFound:
+		return nil, fmt.Errorf("%s has no attestation from %s, so it is not a build of its release workflow", name, upgradeRepo)
+	case (resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests) && resp.Header.Get("X-RateLimit-Remaining") == "0":
+		retry := "in an hour"
+		if n, err := strconv.ParseInt(resp.Header.Get("X-RateLimit-Reset"), 10, 64); err == nil {
+			retry = "after " + time.Unix(n, 0).Format("15:04 MST")
+		}
+		return nil, fmt.Errorf("the GitHub API allows 60 requests an hour without a login and they are used up; retry %s", retry)
+	default:
+		return nil, fmt.Errorf("api.github.com answered %s for the attestation of %s", resp.Status, name)
+	}
+	var body struct {
+		Attestations []struct {
+			Bundle json.RawMessage `json:"bundle"`
+		} `json:"attestations"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 32<<20)).Decode(&body); err != nil {
+		return nil, fmt.Errorf("read the attestation of %s: %w", name, err)
+	}
+	var out bytes.Buffer
+	for _, a := range body.Attestations {
+		if len(a.Bundle) == 0 || string(a.Bundle) == "null" {
+			continue
+		}
+		if err := json.Compact(&out, a.Bundle); err != nil {
+			return nil, fmt.Errorf("read the attestation of %s: %w", name, err)
+		}
+		out.WriteByte('\n')
+	}
+	if out.Len() == 0 {
+		return nil, fmt.Errorf("the attestation response for %s holds no bundle", name)
+	}
+	return out.Bytes(), nil
 }
 
 func validateUpgradeBinary(path, version string) error {

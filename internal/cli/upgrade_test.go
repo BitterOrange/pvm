@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -213,31 +215,96 @@ exec %q "$@"
 	}
 }
 
+// The attestation comes from the API without a login and goes to gh as a
+// bundle; every API failure stops the check with its own reason.
 func TestReleaseAttestationPolicy(t *testing.T) {
 	dir := t.TempDir()
-	log := filepath.Join(dir, "args")
+	log, got := filepath.Join(dir, "args"), filepath.Join(dir, "bundle")
 	gh := filepath.Join(dir, "gh")
-	if err := os.WriteFile(gh, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$ATTEST_ARGS\"\nexit \"$ATTEST_EXIT\"\n"), 0700); err != nil {
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$ATTEST_ARGS\"\n" +
+		"while [ $# -gt 0 ]; do [ \"$1\" = --bundle ] && cat \"$2\" > \"$ATTEST_BUNDLE\"; shift; done\n" +
+		"echo 'Error: verifying with issuer \"sigstore.dev\"' >&2\nexit \"$ATTEST_EXIT\"\n"
+	if err := os.WriteFile(gh, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", dir)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("ATTEST_ARGS", log)
+	t.Setenv("ATTEST_BUNDLE", got)
 	t.Setenv("ATTEST_EXIT", "0")
-	if err := verifyReleaseAttestation("release.tar.gz", "v1.2.3"); err != nil {
+	file := filepath.Join(dir, "release.tar.gz")
+	if err := os.WriteFile(file, []byte("release"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte("release"))
+
+	mode := "ok"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/sha256:"+hex.EncodeToString(sum[:]) || r.Header.Get("Authorization") != "" {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		switch mode {
+		case "ok":
+			fmt.Fprint(w, "{\n  \"attestations\": [\n    {\"bundle_url\": \"x\", \"bundle\": {\"mediaType\": \"a\",\n \"n\": 1}},\n    {\"bundle\": {\"mediaType\": \"b\"}}\n  ]\n}\n")
+		case "notfound":
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		case "ratelimit":
+			w.Header().Set("X-RateLimit-Remaining", "0")
+			w.Header().Set("X-RateLimit-Reset", "1795900000")
+			http.Error(w, `{"message":"API rate limit exceeded"}`, http.StatusForbidden)
+		case "forbidden":
+			w.Header().Set("X-RateLimit-Remaining", "42")
+			http.Error(w, `{"message":"Forbidden"}`, http.StatusForbidden)
+		case "server":
+			http.Error(w, "oops", http.StatusInternalServerError)
+		case "nobundle":
+			fmt.Fprint(w, `{"attestations":[]}`)
+		case "garbage":
+			fmt.Fprint(w, `<html>`)
+		}
+	}))
+	defer srv.Close()
+	old := attestationAPI
+	t.Cleanup(func() { attestationAPI = old })
+	attestationAPI = srv.URL
+
+	if err := verifyReleaseAttestation(file, "v1.2.3"); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(log)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"--repo\n" + upgradeRepo, "--signer-workflow\n" + upgradeRepo + "/.github/workflows/build.yml", "--source-ref\nrefs/tags/v1.2.3", "--deny-self-hosted-runners"} {
+	for _, want := range []string{"--bundle\n", "--repo\n" + upgradeRepo, "--signer-workflow\n" + upgradeRepo + "/.github/workflows/build.yml", "--source-ref\nrefs/tags/v1.2.3", "--deny-self-hosted-runners"} {
 		if !strings.Contains(string(data), want) {
 			t.Fatalf("missing policy %q", want)
 		}
 	}
+	if b, _ := os.ReadFile(got); string(b) != "{\"mediaType\":\"a\",\"n\":1}\n{\"mediaType\":\"b\"}\n" {
+		t.Fatalf("bundle file = %q, want one bundle per line", b)
+	}
 	t.Setenv("ATTEST_EXIT", "1")
-	if err := verifyReleaseAttestation("release.tar.gz", "v1.2.3"); err == nil {
-		t.Fatal("ignored attestation failure")
+	if err := verifyReleaseAttestation(file, "v1.2.3"); err == nil || !strings.Contains(err.Error(), "sigstore.dev") {
+		t.Fatalf("gh failure must stop the check with its reason: %v", err)
+	}
+	t.Setenv("ATTEST_EXIT", "0")
+
+	for m, want := range map[string]string{
+		"notfound":  "has no attestation from " + upgradeRepo,
+		"ratelimit": "60 requests an hour without a login",
+		"forbidden": "403 Forbidden",
+		"server":    "500 Internal Server Error",
+		"nobundle":  "holds no bundle",
+		"garbage":   "read the attestation",
+	} {
+		mode = m
+		if err := verifyReleaseAttestation(file, "v1.2.3"); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: err = %v, want %q", m, err, want)
+		}
+	}
+	srv.Close()
+	if err := verifyReleaseAttestation(file, "v1.2.3"); err == nil || !strings.Contains(err.Error(), "cannot reach api.github.com") {
+		t.Errorf("unreachable API: err = %v", err)
 	}
 }
 

@@ -6,9 +6,36 @@ OWNER="BitterOrange"
 REPO="pvm"
 API="https://api.github.com/repos/${OWNER}/${REPO}/releases/latest"
 BASE="https://github.com/${OWNER}/${REPO}/releases/download"
-command -v gh >/dev/null 2>&1 || { echo "GitHub CLI (gh) with attestation support is required; install it before running this installer" >&2; exit 1; }
+ATTEST_API="https://api.github.com/repos/${OWNER}/${REPO}/attestations"
+command -v gh >/dev/null 2>&1 || { echo "GitHub CLI (gh) with attestation support is required to check the release; no GitHub login is needed" >&2; exit 1; }
+die() { echo "$1; installed version unchanged" >&2; exit 1; }
+header() { tr -d '\r' < att.hdr | awk -v k="$1" -F': *' 'tolower($1) == k {print $2}'; }
+# The attestation is public: fetch it anonymously and verify it offline,
+# so no GitHub login is needed. gh without --bundle would need one.
 attest() {
-  gh attestation verify "$1" --repo "$OWNER/$REPO" --signer-workflow "$OWNER/$REPO/.github/workflows/build.yml" --source-ref "refs/tags/$TAG" --deny-self-hosted-runners --hostname github.com || { echo "release attestation verification failed; installed version unchanged" >&2; exit 1; }
+  if command -v shasum >/dev/null 2>&1; then
+    digest=$(shasum -a 256 "$1" | cut -d' ' -f1)
+  else
+    digest=$(sha256sum "$1" | cut -d' ' -f1)
+  fi
+  code=$(curl -sS -D att.hdr -o att.json -w '%{http_code}' -H 'Accept: application/vnd.github+json' "$ATTEST_API/sha256:$digest") ||
+    die "cannot reach api.github.com for the attestation of $2"
+  case "$code" in
+    200) ;;
+    404) die "$2 has no attestation from $OWNER/$REPO, so it is not a build of its release workflow" ;;
+    403|429)
+      if [ "$(header x-ratelimit-remaining)" = 0 ]; then
+        reset=$(header x-ratelimit-reset)
+        die "the GitHub API allows 60 requests an hour without a login and they are used up; retry after $(date -d "@$reset" 2>/dev/null || date -r "$reset" 2>/dev/null || echo "an hour")"
+      fi
+      die "api.github.com refused the attestation request for $2 (HTTP $code)" ;;
+    *) die "api.github.com answered HTTP $code for the attestation of $2" ;;
+  esac
+  # one bundle per line; a response in another layout leaves this empty and fails
+  sed -n 's/^[[:space:]]*"bundle":[[:space:]]*\({.*}\),\{0,1\}[[:space:]]*$/\1/p' att.json > att.jsonl
+  [ -s att.jsonl ] || die "the attestation response for $2 holds no bundle"
+  gh attestation verify "$1" --bundle att.jsonl --repo "$OWNER/$REPO" --signer-workflow "$OWNER/$REPO/.github/workflows/build.yml" --source-ref "refs/tags/$TAG" --deny-self-hosted-runners --hostname github.com ||
+    die "release attestation verification failed for $2"
 }
 
 if [ -z "${TAG:-}" ]; then
@@ -110,8 +137,8 @@ verify() {
 echo "downloading ${ASSET}.tar.gz (${TAG})..."
 curl -fsSL "$BASE/$TAG/${ASSET}.tar.gz" -o asset.tar.gz
 curl -fsSL "$BASE/$TAG/SHA256SUMS" -o SHA256SUMS
-attest SHA256SUMS
-attest asset.tar.gz
+attest SHA256SUMS SHA256SUMS
+attest asset.tar.gz "${ASSET}.tar.gz"
 verify "${ASSET}.tar.gz" asset.tar.gz
 # Extract only the executable, never arbitrary archive paths.
 [ "$(tar -tzf asset.tar.gz)" = "$BIN_NAME" ] || { echo "unexpected binary archive entries" >&2; exit 1; }
@@ -130,7 +157,7 @@ chmod 755 "$BIN_NAME"
 if [ -n "$QEMU_ASSET" ] && [ "${PVM_SKIP_QEMU:-0}" != "1" ]; then
   echo "staging bundled qemu runtime ($QEMU_ARCH)..."
   curl -fsSL "$BASE/$TAG/$QEMU_ASSET" -o qemu.tar.gz
-  attest qemu.tar.gz
+  attest qemu.tar.gz "$QEMU_ASSET"
   verify "$QEMU_ASSET" qemu.tar.gz
   tar -tzf qemu.tar.gz > qemu.entries
   awk -v arch="$QEMU_ARCH" '/^\// || /(^|\/)\.\.(\/|$)/ {bad=1} $0 != arch && index($0, arch"/") != 1 {bad=1} END {exit bad}' qemu.entries || { echo "unsafe runtime archive paths" >&2; exit 1; }
