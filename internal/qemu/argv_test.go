@@ -157,8 +157,8 @@ func TestBuildArgsGPU(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(joined(args), "virtio-balloon-pci,free-page-reporting=on") {
-		t.Error("balloon on must add virtio-balloon with free-page-reporting")
+	if !strings.Contains(joined(args), "virtio-balloon-pci,free-page-reporting=on,deflate-on-oom=on") {
+		t.Error("balloon on must add virtio-balloon with free-page-reporting and deflate-on-oom")
 	}
 }
 

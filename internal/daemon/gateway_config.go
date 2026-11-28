@@ -78,22 +78,7 @@ func gatewayConfigFromCluster(s *Server, cl *cluster.Cluster) []byte {
 		}
 		doc.Maps = append(doc.Maps, mapEntry{HostPort: m.PoolPort, VMIP: m.VMIP, GuestPort: m.GuestPort, Proto: m.Proto})
 	}
-	// Push only referenced exits so unrelated credentials stay off the gateway.
-	want := map[string]bool{}
-	for _, exitName := range cl.VMExits {
-		if exitName != "" && exitName != "direct" {
-			want[exitName] = true
-		}
-	}
-	if cl.DefaultExit != "" {
-		want[cl.DefaultExit] = true
-	}
-	for _, r := range cl.Rules {
-		if r.Action == rules.Proxy && r.Exit != "" {
-			want[r.Exit] = true
-		}
-	}
-	for name := range want {
+	for name := range referencedExits(cl) {
 		e, err := exit.LoadEntry(filepath.Join(s.P.Home, "exits"), name)
 		if err != nil {
 			continue // Unregistered exits stay absent so their flows fail closed.
@@ -118,4 +103,25 @@ func gatewayConfigFromCluster(s *Server, cl *cluster.Cluster) []byte {
 	}
 	data, _ := json.MarshalIndent(doc, "", "  ")
 	return data
+}
+
+// referencedExits are the exits a VM route, the cluster default or a proxy
+// rule uses. Only these reach the gateway, so unrelated credentials stay
+// off it.
+func referencedExits(cl *cluster.Cluster) map[string]bool {
+	want := map[string]bool{}
+	for _, exitName := range cl.VMExits {
+		if exitName != "" && exitName != "direct" {
+			want[exitName] = true
+		}
+	}
+	if cl.DefaultExit != "" {
+		want[cl.DefaultExit] = true
+	}
+	for _, r := range cl.Rules {
+		if r.Action == rules.Proxy && r.Exit != "" {
+			want[r.Exit] = true
+		}
+	}
+	return want
 }

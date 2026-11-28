@@ -895,27 +895,10 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		s.ensureAgentAsync(spec)
 	}
 	if man != nil {
-		vmDir := s.P.VMDir(spec.Name)
-		if err := inst.WaitRestored(vmDir); err != nil {
-			inst.Stop()
-			s.invalidateAgent(spec.Name)
-			s.resetStages(spec.Name)
-			s.stage(spec.Name, "failed", "snapshot restore failed; retry pvm start after inspecting the error")
-			writeErr(w, 500, fmt.Errorf("restore failed, vm stopped: %w", err))
+		if err := s.finishRestore(spec, inst); err != nil {
+			writeErr(w, 500, err)
 			return
 		}
-		// Shares were hot-unplugged before the snapshot and re-attached
-		// after the restore; remount them (ssh needs a moment after
-		// resume).
-		go func() {
-			for i := 0; i < 15; i++ {
-				if err := s.sshGuest(spec, "sudo mount -a"); err == nil {
-					return
-				}
-				time.Sleep(2 * time.Second)
-			}
-			log.Printf("restore %s: remount of 9p shares failed", spec.Name)
-		}()
 		writeJSON(w, 200, map[string]any{"started": spec.Name, "restored": man.CreatedAt})
 		return
 	}
@@ -1297,6 +1280,32 @@ func (s *Server) recoverClustersOnce() bool {
 	return healthy
 }
 
+// finishRestore resumes a VM that startVM began restoring from its RAM
+// snapshot. Without it the guest stays paused after the incoming
+// migration. On failure the VM is stopped and marked failed.
+func (s *Server) finishRestore(spec *vm.Spec, inst *qemu.Instance) error {
+	if err := inst.WaitRestored(s.P.VMDir(spec.Name)); err != nil {
+		inst.Stop()
+		s.invalidateAgent(spec.Name)
+		s.resetStages(spec.Name)
+		s.stage(spec.Name, "failed", "snapshot restore failed; retry pvm start after inspecting the error")
+		return fmt.Errorf("restore failed, vm stopped: %w", err)
+	}
+	// Shares were hot-unplugged before the snapshot and re-attached
+	// after the restore; remount them (ssh needs a moment after
+	// resume).
+	go func() {
+		for i := 0; i < 15; i++ {
+			if err := s.sshGuest(spec, "sudo mount -a"); err == nil {
+				return
+			}
+			time.Sleep(2 * time.Second)
+		}
+		log.Printf("restore %s: remount of 9p shares failed", spec.Name)
+	}()
+	return nil
+}
+
 // restoreDesiredVM restarts a VM that was running before a daemon restart
 // (with restore=1) or a host reboot.
 func (s *Server) restoreDesiredVM(spec *vm.Spec) {
@@ -1314,10 +1323,18 @@ func (s *Server) restoreDesiredVM(spec *vm.Spec) {
 	s.resetStages(fresh.Name)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	if _, _, err := s.startVM(ctx, fresh); err != nil {
+	inst, man, err := s.startVM(ctx, fresh)
+	if err != nil {
 		log.Printf("auto-restore VM %s: %v", fresh.Name, err)
 		s.stage(fresh.Name, "failed", fmt.Sprintf("auto-restore failed: %v; run `pvm start %s`", err, fresh.Name))
 		return
+	}
+	if man != nil {
+		if err := s.finishRestore(fresh, inst); err != nil {
+			log.Printf("auto-restore VM %s: %v", fresh.Name, err)
+			s.stage(fresh.Name, "failed", fmt.Sprintf("auto-restore failed: %v; run `pvm start %s`", err, fresh.Name))
+			return
+		}
 	}
 	if fresh.IdentityReset {
 		s.maybeIdentityReset(fresh)

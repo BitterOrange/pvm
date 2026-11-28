@@ -95,7 +95,7 @@ type VMConfig struct {
 	UUID          string
 	SMBIOSSerials [3]string
 	GPU           bool // virtio-gpu display device
-	Balloon       bool // virtio-balloon with free-page-reporting
+	Balloon       bool // virtio-balloon with free-page-reporting and deflate-on-oom
 }
 
 func validateUnixSocketPath(name, path string) error {
@@ -238,7 +238,10 @@ func BuildArgs(t *Toolchain, c *VMConfig) ([]string, error) {
 		args = append(args, "-device", "virtio-gpu-pci")
 	}
 	if c.Balloon {
-		args = append(args, "-device", "virtio-balloon-pci,free-page-reporting=on")
+		// The daemon samples guest memory every few seconds; a sudden
+		// allocation outruns it, so the guest may take pages back from
+		// the balloon before its OOM killer runs.
+		args = append(args, "-device", "virtio-balloon-pci,free-page-reporting=on,deflate-on-oom=on")
 	}
 	if c.Incoming != "" {
 		args = append(args, "-incoming", c.Incoming)

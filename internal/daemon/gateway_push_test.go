@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"sync"
@@ -211,3 +212,28 @@ func noForwardSync(int) error { return nil }
 // noApplyWait stands in for the wait on the gateway agent's receipt: these
 // tests have no agent; appliedResult has its own test.
 func noApplyWait(context.Context, *vm.Spec, string) error { return nil }
+
+// An exit nothing routes through is absent from the gateway, so probing it
+// must say so instead of blaming the VPS firewall.
+func TestExitProbeNeedsARoutedExit(t *testing.T) {
+	s := newPushTestServer(t)
+	if _, err := s.Clusters.Ensure(cluster.DefaultClusterID); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.probeExitEgress(context.Background(), "my-exit")
+	var ae *APIError
+	if !errors.As(err, &ae) || ae.Code != "exit_not_routed" || ae.HTTPStatus != 409 || !strings.Contains(ae.NextAction, "pvm route dev1 --via my-exit") {
+		t.Fatalf("unrouted exit: got %v", err)
+	}
+	if err := s.Clusters.SetVMExit(cluster.DefaultClusterID, "dev1", "my-exit"); err != nil {
+		t.Fatal(err)
+	}
+	cl := s.Clusters.Get(cluster.DefaultClusterID)
+	if !referencedExits(cl)["my-exit"] {
+		t.Fatal("a VM route must make the exit referenced")
+	}
+	_, err = s.probeExitEgress(context.Background(), "my-exit")
+	if errors.As(err, &ae) && ae.Code == "exit_not_routed" {
+		t.Fatalf("routed exit refused as unrouted: %v", err)
+	}
+}
