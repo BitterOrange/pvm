@@ -278,11 +278,15 @@ func exitAdd(args []string) int {
 
 	var e *exit.Entry
 	var suggestedTZ string
+	host, err := os.Hostname()
+	if err != nil {
+		host = "pvm"
+	}
 	if *transport == "auto" {
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
 		fmt.Printf("probing transports in parallel (%d x 8MB download each)...\n", *samples)
-		probes := exit.ProbeAll(ctx, *server, *token, fp, []string{"udp", "tcp"}, exit.ProbeSpeedBytes, *samples)
+		probes := exit.ProbeAll(ctx, *server, *token, fp, host, []string{"udp", "tcp"}, exit.ProbeSpeedBytes, *samples)
 		for _, pr := range probes {
 			if pr.Err != nil {
 				fmt.Printf("  %-4s failed: %v\n", pr.Transport, pr.Err)
@@ -325,10 +329,6 @@ func exitAdd(args []string) int {
 		pub, err := tunnel.PublicKey(priv)
 		if err != nil {
 			return fail("%v", err)
-		}
-		host, err := os.Hostname()
-		if err != nil {
-			host = "pvm"
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
