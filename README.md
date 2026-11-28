@@ -233,7 +233,7 @@ Update checks are off by default; set `update_check: true` in `~/.pvm/config.yam
 
 Recent releases (all versions are in [docs/release-notes](docs/release-notes)):
 
-- **v1.4.1** (in progress): upstream v1.3.0-1.3.1 merged, bringing Mihomo exits, `pvm check`, `pvm diag`, `pvm dashboard`, `--json`, `pvm job`, `pvm ssh-config`, `pvm-exit` with `pvm exit deploy` and invites, `pvm image default`, VMs restarted after a daemon restart, and the clipboard bridge on macOS and Linux.
+- **v1.4.1** (in progress): upstream v1.3.0-1.3.1 merged, bringing Mihomo exits, `pvm check`, `pvm diag`, `pvm dashboard`, `--json`, `pvm job`, `pvm ssh-config`, `pvm-exit` with `pvm exit deploy` and invites, `pvm image default`, VMs restarted after a daemon restart, the memory balloon, DoH failover, and the clipboard bridge on macOS and Linux. A route switch sets the timezone of the exit's public IP. The installers, `pvm upgrade` and `pvm exit deploy` verify release attestations with `gh` but need no GitHub login. Tested end to end on Windows (WHPX), Linux (KVM) and an M1 Mac, with the project QEMU build and the official ones.
 - **v1.4.0**: `pvm qemu`, with pinned pvm-qemu builds or the platform's official QEMU; the gateway boots on M1 Macs.
 - **v1.3.x**: PVM Desktop, the app catalog, the keyring setting, window scale and input methods in `pvm app`.
 
