@@ -234,7 +234,7 @@ ufw route allow in on pvmexit1 out on eth0
 
 近期版本（全部版本见 [docs/release-notes](docs/release-notes)）：
 
-- **v1.4.1**（进行中）：合并上游 v1.3.0-1.3.1，带来 Mihomo 出口、`pvm check`、`pvm diag`、`pvm dashboard`、`--json`、`pvm job`、`pvm ssh-config`、`pvm-exit` 及 `pvm exit deploy` 和邀请串、`pvm image default`、daemon 重启后恢复虚拟机、内存 balloon、DoH 主备切换，以及 macOS 和 Linux 上的剪贴板桥。切换路由时按出口公网 IP 的所在地设置时区。安装包和 `install.sh` 不再自带 QEMU，改由 PVM Desktop、`pvm qemu install` 或 `PVM_QEMU` 设置。安装脚本、`pvm upgrade` 和 `pvm exit deploy` 用 `gh` 校验发布签名，但不需要登录 GitHub。已在 Windows（WHPX）、Linux（KVM）和 M1 Mac 上端到端测试，包括项目构建和官方构建的 QEMU。
+- **v1.4.1**：合并上游 v1.3.0-1.3.1，带来 Mihomo 出口、`pvm check`、`pvm diag`、`pvm dashboard`、`--json`、`pvm job`、`pvm ssh-config`、`pvm-exit` 及 `pvm exit deploy` 和邀请串、`pvm image default`、daemon 重启后恢复虚拟机、内存 balloon、DoH 主备切换，以及 macOS 和 Linux 上的剪贴板桥。切换路由时按出口公网 IP 的所在地设置时区。安装包和 `install.sh` 不再自带 QEMU，改由 PVM Desktop、`pvm qemu install` 或 `PVM_QEMU` 设置。安装脚本、`pvm upgrade` 和 `pvm exit deploy` 用 `gh` 校验发布签名，但不需要登录 GitHub。已在 Windows（WHPX）、Linux（KVM）和 M1 Mac 上端到端测试，包括项目构建和官方构建的 QEMU。
 - **v1.4.0**：`pvm qemu`，使用固定的 pvm-qemu 构建或本平台官方 QEMU；M1 Mac 上网关可以启动。
 - **v1.3.x**：PVM Desktop、应用目录、密钥环设置、`pvm app` 的窗口缩放和输入法。
 
