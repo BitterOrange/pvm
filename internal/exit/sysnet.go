@@ -141,7 +141,7 @@ func EnableIPForward() error {
 		return fmt.Errorf("sysctl ip_forward: %v: %s", err, out)
 	}
 	if _, err := os.Stat("/etc/sysctl.d"); err == nil {
-		_ = os.WriteFile("/etc/sysctl.d/99-pvm-exit.conf", []byte("net.ipv4.ip_forward=1\n"), 0o644)
+		_ = os.WriteFile("/etc/sysctl.d/60-pvm-exit.conf", []byte("net.ipv4.ip_forward=1\n"), 0o644)
 	}
 	return nil
 }

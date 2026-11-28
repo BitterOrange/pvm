@@ -4,12 +4,53 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
 
 // legacyUnitPath is where `pvm exit-agent install` put its unit.
 const legacyUnitPath = "/etc/systemd/system/pvm-exit-agent.service"
+
+// legacySysctlPath is the forwarding file `pvm exit-agent` wrote before
+// SysctlPath replaced it.
+const legacySysctlPath = "/etc/sysctl.d/99-pvm-exit.conf"
+
+// standardTokenPath is where a migrated token moves, or "" when it stays:
+// a token in the config directory takes the standard name, so a migrated
+// VPS has the layout of a fresh install. A token elsewhere is not moved.
+func standardTokenPath(d Dirs, legacy string) string {
+	std := DefaultConfig(d).AdminTokenFile
+	if filepath.Dir(legacy) != d.Config || legacy == std {
+		return ""
+	}
+	return std
+}
+
+// linkToken gives the token its standard name as a second link, so the
+// old service, still running, keeps reading the old one.
+func linkToken(from, to string) error {
+	err := os.Link(from, to)
+	if err == nil {
+		return nil
+	}
+	if a, e1 := os.Stat(from); e1 == nil {
+		if b, e2 := os.Stat(to); e2 == nil && os.SameFile(a, b) {
+			return nil
+		}
+	}
+	return fmt.Errorf("--migrate: link %s to %s: %w", from, to, err)
+}
+
+// removeLegacySysctl removes the old forwarding file once SysctlPath holds
+// the same setting. A file with any other content is left alone.
+func removeLegacySysctl(path string) error {
+	b, err := os.ReadFile(path)
+	if err != nil || string(b) != "net.ipv4.ip_forward=1\n" {
+		return nil
+	}
+	return os.Remove(path)
+}
 
 // migratedConfig rebuilds the legacy service's flags as a config. The
 // state directory and token file stay where they are, so the certificate

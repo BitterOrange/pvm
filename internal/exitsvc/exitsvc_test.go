@@ -89,6 +89,60 @@ func TestConfigFromLegacyUnit(t *testing.T) {
 	}
 }
 
+// A migrated token in the config directory takes the standard name through
+// a second link; the legacy forwarding file goes only when pvm wrote it.
+func TestMigrateTidiesLegacyFiles(t *testing.T) {
+	dir := t.TempDir()
+	d := Dirs{Config: dir, State: t.TempDir()}
+	std := DefaultConfig(d).AdminTokenFile
+	legacy := filepath.Join(dir, "token")
+	if got := standardTokenPath(d, legacy); got != std {
+		t.Fatalf("standardTokenPath = %q, want %q", got, std)
+	}
+	for _, keep := range []string{std, "/root/pvm-token"} {
+		if got := standardTokenPath(d, keep); got != "" {
+			t.Errorf("standardTokenPath(%q) = %q, want it kept in place", keep, got)
+		}
+	}
+	if err := os.WriteFile(legacy, []byte("YOUR_TOKEN\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := linkToken(legacy, std); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if b, err := os.ReadFile(std); err != nil || string(b) != "YOUR_TOKEN\n" {
+		t.Fatalf("standard token = %q, %v", b, err)
+	}
+	other := filepath.Join(dir, "other")
+	if err := os.WriteFile(other, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := linkToken(other, std); err == nil {
+		t.Fatal("a different file at the standard name must not be replaced")
+	}
+
+	ours, edited := filepath.Join(dir, "99-ours.conf"), filepath.Join(dir, "99-edited.conf")
+	if err := os.WriteFile(ours, []byte("net.ipv4.ip_forward=1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(edited, []byte("net.ipv4.ip_forward=1\nnet.core.somaxconn=4096\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{ours, edited, filepath.Join(dir, "missing.conf")} {
+		if err := removeLegacySysctl(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(ours); !os.IsNotExist(err) {
+		t.Error("the file pvm wrote must be removed")
+	}
+	if _, err := os.Stat(edited); err != nil {
+		t.Error("an edited file must stay")
+	}
+}
+
 func TestInviteServer(t *testing.T) {
 	c := Config{Listen: ":18443"}
 	if _, err := inviteServer("", c); err == nil {

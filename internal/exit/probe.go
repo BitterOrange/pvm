@@ -97,8 +97,9 @@ func (p *TransportProbe) Mbps() float64 {
 
 // ProbeTransport enrolls with one transport and measures it. The probe
 // keeps its enrolled peer — the caller either builds an Entry from it
-// (winner) or revokes it (loser) via RevokeProbe.
-func ProbeTransport(ctx context.Context, server, token, fingerprint, transport string, bytesN int64, samples int) *TransportProbe {
+// (winner) or revokes it (loser) via RevokeProbe, so it registers under
+// the host's own name.
+func ProbeTransport(ctx context.Context, server, token, fingerprint, hostname, transport string, bytesN int64, samples int) *TransportProbe {
 	p := &TransportProbe{Transport: transport}
 	fail := func(err error) *TransportProbe {
 		p.Err = err
@@ -114,7 +115,6 @@ func ProbeTransport(ctx context.Context, server, token, fingerprint, transport s
 	}
 	p.Priv, p.Pub = priv, pub
 
-	hostname := "pvm-probe"
 	client := NewClient(server, token, fingerprint)
 	resp, err := client.Enroll(ctx, pub, hostname, transport)
 	if err != nil {
@@ -157,14 +157,14 @@ func ProbeTransport(ctx context.Context, server, token, fingerprint, transport s
 }
 
 // ProbeAll probes every given transport in parallel.
-func ProbeAll(ctx context.Context, server, token, fingerprint string, transports []string, bytesN int64, samples int) []*TransportProbe {
+func ProbeAll(ctx context.Context, server, token, fingerprint, hostname string, transports []string, bytesN int64, samples int) []*TransportProbe {
 	out := make([]*TransportProbe, len(transports))
 	var wg sync.WaitGroup
 	for i, tr := range transports {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			out[i] = ProbeTransport(ctx, server, token, fingerprint, tr, bytesN, samples)
+			out[i] = ProbeTransport(ctx, server, token, fingerprint, hostname, tr, bytesN, samples)
 		}()
 	}
 	wg.Wait()

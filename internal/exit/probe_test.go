@@ -139,7 +139,7 @@ func TestProbeInProcessUserspace(t *testing.T) {
 	ctx := t.Context()
 	// small download: this test covers plumbing, and -race slows the
 	// in-process gVisor path ~10x
-	probes := ProbeAll(ctx, srv.ControlAddr(), "test-token", fp, []string{"udp", "tcp"}, 1<<18, 2)
+	probes := ProbeAll(ctx, srv.ControlAddr(), "test-token", fp, "laptop", []string{"udp", "tcp"}, 1<<18, 2)
 	for _, p := range probes {
 		if p.Err != nil {
 			t.Fatalf("%s probe: %v", p.Transport, p.Err)
@@ -164,8 +164,12 @@ func TestProbeInProcessUserspace(t *testing.T) {
 			}
 		}
 	}
-	if got := len(srv.store.List()); got != 1 {
-		t.Fatalf("peers after revoke = %d, want 1 (winner only)", got)
+	peers := srv.store.List()
+	if len(peers) != 1 {
+		t.Fatalf("peers after revoke = %d, want 1 (winner only)", len(peers))
+	}
+	if peers[0].Hostname != "laptop" {
+		t.Fatalf("winner registered as %q, want the host's name", peers[0].Hostname)
 	}
 }
 

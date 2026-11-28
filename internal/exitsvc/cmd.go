@@ -245,6 +245,7 @@ func cmdInit(args []string) int {
 
 	cfg := DefaultConfig(d)
 	existing := false
+	movedToken := ""
 	if _, err := os.Stat(d.ConfigPath()); err == nil {
 		if *migrate {
 			return fail("%s already exists; --migrate only creates a new config", d.ConfigPath())
@@ -256,6 +257,9 @@ func cmdInit(args []string) int {
 	} else if *migrate {
 		if cfg, err = migratedConfig(d); err != nil {
 			return fail("%v", err)
+		}
+		if std := standardTokenPath(d, cfg.AdminTokenFile); std != "" {
+			movedToken, cfg.AdminTokenFile = cfg.AdminTokenFile, std
 		}
 	} else if _, err := os.Stat(legacyUnitPath); err == nil && mode == ModeSystem {
 		rerun := "sudo pvm-exit init --migrate"
@@ -309,6 +313,11 @@ func cmdInit(args []string) int {
 	if err := os.MkdirAll(cfg.StateDir, 0o700); err != nil {
 		return fail("%v", err)
 	}
+	if movedToken != "" {
+		if err := linkToken(movedToken, cfg.AdminTokenFile); err != nil {
+			return fail("%v", err)
+		}
+	}
 	created, err := ensureAdminToken(cfg.AdminTokenFile)
 	if err != nil {
 		return fail("%v", err)
@@ -343,6 +352,9 @@ func cmdInit(args []string) int {
 				return fail("write %s: %v", SysctlPath, err)
 			}
 			if err := run("sysctl", "-w", "net.ipv4.ip_forward=1"); err != nil {
+				return fail("%v", err)
+			}
+			if err := removeLegacySysctl(legacySysctlPath); err != nil {
 				return fail("%v", err)
 			}
 		}
@@ -390,6 +402,11 @@ func cmdInit(args []string) int {
 		if err := retireLegacyUnit(); err != nil {
 			return fail("%v", err)
 		}
+		if movedToken != "" {
+			if err := os.Remove(movedToken); err != nil {
+				return fail("%v", err)
+			}
+		}
 	}
 	if err := run("systemctl", append(sctl, "daemon-reload")...); err != nil {
 		return fail("%v", err)
@@ -409,7 +426,11 @@ func cmdInit(args []string) int {
 	fmt.Printf("pvm-exit %s install ready\n", mode)
 	fmt.Printf("  config:      %s%s\n", d.ConfigPath(), map[bool]string{true: " (kept)", false: ""}[existing])
 	fmt.Printf("  state:       %s\n", cfg.StateDir)
-	fmt.Printf("  admin token: %s%s\n", cfg.AdminTokenFile, map[bool]string{true: " (new)", false: " (kept)"}[created])
+	tokenNote := map[bool]string{true: " (new)", false: " (kept)"}[created]
+	if movedToken != "" {
+		tokenNote = " (kept, moved from " + movedToken + ")"
+	}
+	fmt.Printf("  admin token: %s%s\n", cfg.AdminTokenFile, tokenNote)
 	fmt.Printf("  fingerprint: %s\n", fp)
 	fmt.Printf("  service:     %s (%s)\n", unitPath, map[bool]string{true: "not started", false: "started"}[*noStart])
 	fmt.Printf("open TCP %s and UDP %d (WireGuard/UDP), TCP %d (WireGuard/TCP) in the VPS firewall\n", cfg.ListenPort(), cfg.UDPPort, cfg.TCPPort)
