@@ -206,7 +206,7 @@ pvm exit deploy my-exit --ssh root@vps.example.com
 
 SSH 已经验证了 VPS 的身份，所以证书指纹随一次性邀请串一起传回，不需要手动复制 token。用有 sudo 权限的用户时安装系统服务；`--user-mode` 安装 systemd 用户服务，使用用户态 NAT，完全不需要 root；但需要管理员为该用户开启 linger（执行一次 `sudo loginctl enable-linger USER`），否则用户退出登录后服务就会停止。
 
-系统服务以 `pvm-exit` 用户运行：内核 NAT 只授予 `CAP_NET_ADMIN` 和 `CAP_NET_RAW`，用户态 NAT 不授予任何 capability。配置在 `/etc/pvm-exit/config.yaml`。如果想在 VPS 上自己安装，可以用发布页的 `.deb`（`sudo apt install ./pvm-exit_<version>_amd64.deb`）或 `scripts/install-exit.sh`，然后在 VPS 上生成邀请串：
+系统服务以 `pvm-exit` 用户运行：内核 NAT 只授予 `CAP_NET_ADMIN` 和 `CAP_NET_RAW`，用户态 NAT 不授予任何 capability。配置在 `/etc/pvm-exit/config.yaml`。如果想在 VPS 上自己安装，可以用发布页的 `.deb`（`sudo apt install ./pvm-exit_<version>_amd64.deb`）或 `scripts/install-exit.sh`（它用 `gh` 校验发布的 attestation，不需要登录 GitHub），然后在 VPS 上生成邀请串：
 
 ```bash
 sudo pvm-exit invite laptop        # 输出：pvm exit add my-exit --invite pvmx1:...
