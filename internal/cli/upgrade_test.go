@@ -147,12 +147,36 @@ func TestInstallerStagesAllAssetsBeforeReplacing(t *testing.T) {
 			write(filepath.Join(bin, "file"), "#!/bin/sh\nif [ \"$SCENARIO\" = binary-platform-fails ]; then echo 'ELF 64-bit executable aarch64'; else echo 'Mach-O 64-bit executable arm64'; fi\n")
 			write(filepath.Join(bin, "uname"), "#!/bin/sh\ncase \"$1\" in -s) echo Darwin;; -m) echo arm64;; esac\n")
 			write(filepath.Join(bin, "curl"), `#!/bin/sh
-url=$2
+out= hdr= url=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out=$2; shift ;;
+    -D) hdr=$2; shift ;;
+    -w|-H) shift ;;
+    -*) ;;
+    *) url=$1 ;;
+  esac
+  shift
+done
+case "$url" in
+  */attestations/sha256:*)
+    printf 'HTTP/2 200\r\n\r\n' > "$hdr"
+    printf '{\n  "attestations": [\n    {\n      "bundle": {"mediaType":"fake"}\n    }\n  ]\n}\n' > "$out"
+    printf 200
+    exit 0 ;;
+esac
 name=${url##*/}
 if [ "$SCENARIO" = runtime-download-fails ] && [ "$name" = pvm-qemu-runtime-aarch64.tar.gz ]; then exit 22; fi
-cp "$FIXTURES/$name" "$4"
+cp "$FIXTURES/$name" "$out"
 `)
-			write(filepath.Join(bin, "gh"), "#!/bin/sh\n[ \"$SCENARIO\" != attestation-fails ]\n")
+			write(filepath.Join(bin, "gh"), `#!/bin/sh
+[ "$SCENARIO" != attestation-fails ] || exit 1
+while [ $# -gt 0 ]; do
+  if [ "$1" = --bundle ]; then grep -q '"mediaType":"fake"' "$2"; exit; fi
+  shift
+done
+exit 1
+`)
 			write(filepath.Join(bin, "codesign"), "#!/bin/sh\necho '<key>com.apple.security.hypervisor</key><true/>'\n")
 			mv, err := exec.LookPath("mv")
 			if err != nil {
