@@ -365,7 +365,7 @@ func exitAdd(args []string) int {
 	fmt.Printf("exit %q added: transport=%s tunnel_ip=%s endpoint=%s mtu=%d\n",
 		name, e.Transport, e.TunnelIP, e.Endpoint, e.MTU)
 	if e.AutoTZ != "" {
-		fmt.Printf("suggested timezone from server: %s (auto; override with `pvm exit set %s --tz ...`)\n", e.AutoTZ, name)
+		fmt.Printf("timezone of the exit server: %s (auto; once a VM routes through %s it takes the zone of the exit's public IP; override with `pvm exit set %s --tz ...`)\n", e.AutoTZ, name, name)
 	}
 	return 0
 }
@@ -640,6 +640,11 @@ func exitTest(args []string) int {
 		if err := c.Post("/v1/exits/"+url.PathEscape(name)+"/probe", nil, &res); err != nil {
 			if errors.Is(err, daemon.ErrDaemonOutdated) {
 				fmt.Printf("egress probe: skipped (%v)\n", err)
+				return
+			}
+			var ae *daemon.APIError
+			if errors.As(err, &ae) && ae.Code == "exit_not_routed" {
+				fmt.Printf("egress probe: skipped (%s; to probe it: %s)\n", ae.Message, ae.NextAction)
 				return
 			}
 			fmt.Printf("egress=fail: real internet egress through %s failed: %v (check VPS firewall forwarding, e.g. ufw route allow)\n", name, err)

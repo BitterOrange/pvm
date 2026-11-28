@@ -20,10 +20,22 @@ func (s *Server) applyRegionProfile(spec *vm.Spec, via string) string {
 	if err != nil {
 		return ""
 	}
-	// Manual tz wins; then the cached server-suggested zone; then a
-	// live probe (one throwaway enroll, revoked immediately) which is
-	// cached back into the entry for next time.
+	// Manual tz wins; then the zone of the exit's public IP, sampled
+	// through the exit; then the cached zone; then the exit host's own
+	// zone from a throwaway enroll, revoked immediately. A learned zone
+	// is cached back into the entry for next time.
 	tz, locale := entry.TZ, entry.Locale
+	if tz == "" {
+		if geo := s.exitGeoTZ(via); geo != "" {
+			tz = geo
+			if entry.AutoTZ != geo {
+				entry.AutoTZ = geo
+				if err := exit.SaveEntry(dir, entry); err != nil {
+					return fmt.Sprintf("learned auto tz %s but entry save failed: %v", tz, err)
+				}
+			}
+		}
+	}
 	if tz == "" {
 		tz = entry.AutoTZ
 	}
@@ -128,6 +140,19 @@ func (s *Server) restoreRegion(spec *vm.Spec) string {
 		note = fmt.Sprintf("region restored in guest but spec save failed: %v", err)
 	}
 	return note
+}
+
+// exitGeoTZ is the timezone of the exit's public IP, sampled from the
+// gateway through the exit, so it matches what sites see; empty when the
+// probe fails or the zone is unusable.
+func (s *Server) exitGeoTZ(name string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	res, err := s.probeExitEgress(ctx, name)
+	if err != nil || res.Geo == nil || vm.ValidateTZ(res.Geo.Timezone) != nil {
+		return ""
+	}
+	return res.Geo.Timezone
 }
 
 func (s *Server) probeSuggestedTZ(entry *exit.Entry) string {

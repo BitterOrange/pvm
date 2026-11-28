@@ -59,8 +59,9 @@ type Entry struct {
 	Mihomo       *MihomoSpec  `json:"mihomo,omitempty"`
 	// Region profile: applied to VMs routed via this exit so their
 	// environment matches the exit's geography. TZ is the manual
-	// override (exit set --tz); AutoTZ is learned from the exit-agent's
-	// enroll response and used when TZ is empty.
+	// override (exit set --tz); AutoTZ, used when TZ is empty, is the
+	// zone of the exit's public IP once a VM routed through it, and the
+	// exit server's own zone before that.
 	TZ        string               `json:"tz,omitempty"`
 	AutoTZ    string               `json:"auto_tz,omitempty"`
 	Locale    string               `json:"locale,omitempty"`

@@ -105,30 +105,50 @@ func (s *Server) checkPath(name string) string {
 }
 
 func (s *Server) handleExitProbe(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	cl := s.Clusters.Get(1)
-	if cl == nil {
-		writeErr(w, 409, fmt.Errorf("no cluster yet; create a VM first"))
-		return
-	}
-	gw, err := s.getSpec(cl.Gateway)
-	if err != nil {
-		writeErr(w, 404, err)
-		return
-	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	out, err := s.sshRunCtx(ctx, gw, s.gatewayBinCmd("__probe-exit", "--exit", name, "--geo"))
+	res, err := s.probeExitEgress(ctx, r.PathValue("name"))
 	if err != nil {
-		writeErr(w, 502, fmt.Errorf("probe exit %s: %w", name, err))
-		return
-	}
-	var res gateway.ExitProbeResult
-	if err := json.Unmarshal([]byte(out), &res); err != nil {
-		writeErr(w, 502, err)
+		code := 502
+		var ae *APIError
+		if errors.As(err, &ae) {
+			code = ae.HTTPStatus
+		}
+		writeErr(w, code, err)
 		return
 	}
 	writeJSON(w, 200, res)
+}
+
+// probeExitEgress samples the public IP and geo of an exit from the
+// gateway, through that exit. The gateway holds only the exits something
+// routes through, so an exit nothing uses yet cannot be probed.
+func (s *Server) probeExitEgress(ctx context.Context, name string) (*gateway.ExitProbeResult, error) {
+	cl := s.Clusters.Get(1)
+	if cl == nil {
+		return nil, &APIError{Message: "no cluster yet; create a VM first", Code: "no_cluster", HTTPStatus: 409}
+	}
+	if !referencedExits(cl)[name] {
+		return nil, &APIError{
+			Message:    fmt.Sprintf("no VM routes through %s yet, so the gateway has no tunnel to it", name),
+			Code:       "exit_not_routed",
+			NextAction: fmt.Sprintf("pvm route dev1 --via %s, then pvm exit test %s", name, name),
+			HTTPStatus: 409,
+		}
+	}
+	gw, err := s.getSpec(cl.Gateway)
+	if err != nil {
+		return nil, &APIError{Message: err.Error(), Code: "vm_not_found", HTTPStatus: 404}
+	}
+	out, err := s.sshRunCtx(ctx, gw, s.gatewayBinCmd("__probe-exit", "--exit", name, "--geo"))
+	if err != nil {
+		return nil, fmt.Errorf("probe exit %s: %w", name, err)
+	}
+	var res gateway.ExitProbeResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
 }
 
 func (s *Server) handleVMCheck(w http.ResponseWriter, r *http.Request) {

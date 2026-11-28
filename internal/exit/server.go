@@ -489,8 +489,9 @@ type enrollResponse struct {
 	ServerIP     string `json:"server_ip"` // tunnel-side .1 address (speed/ping endpoint)
 	MTU          int    `json:"mtu"`
 	Endpoint     string `json:"endpoint"`
-	// SuggestedTZ is the exit's public-geo timezone (IANA), detected at
-	// agent startup; empty means "treat as UTC".
+	// SuggestedTZ is the exit host's own timezone (IANA), read at
+	// startup unless configured; empty means "treat as UTC". Clients
+	// prefer the zone of the exit's public IP.
 	SuggestedTZ string `json:"suggested_tz,omitempty"`
 }
 
