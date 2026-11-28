@@ -13,7 +13,7 @@ Personal QEMU dev VMs in a single binary: create an isolated Linux development m
 - **VM programs as host windows.** `pvm app dev1 -- gedit` opens one program as its own window on your desktop; its cookies, fingerprint and traffic stay in the VM.
 - **Your project folders in the VM.** Mount a folder, keep two synced copies, or upload once and download the result.
 - **Made for scripts and agents.** `--json` output, `pvm capabilities`, `pvm job` and a read-only `pvm dashboard`.
-- **Windows without administrator rights.** One installer brings pvm, the PVM Desktop app, QEMU and the Xpra client.
+- **Windows without administrator rights.** One installer brings pvm, the PVM Desktop app and the Xpra client; PVM Desktop or `pvm qemu install` then sets up QEMU.
 
 ## Installation
 
@@ -23,13 +23,14 @@ pvm runs on macOS on arm64, Linux on amd64, and Windows on amd64.
 
 1. Download `pvm_windows_amd64_setup.exe` or `pvm_windows_amd64_setup.msi` from [Releases](../../releases). To verify it first: `gh attestation verify pvm_windows_amd64_setup.exe --repo BitterOrange/pvm`.
 2. Run it. No administrator rights are needed.
-3. Open a new terminal and run `pvm doctor`, or open **PVM Desktop** from the Start menu.
+3. Open **PVM Desktop** from the Start menu and set up QEMU there, or open a new terminal and run `pvm qemu install`.
 
-Both installers put `pvm.exe` and `pvm-desktop.exe` in `%LOCALAPPDATA%\pvm`, add that folder to the user `PATH`, add a Start menu shortcut, install the Xpra client, and place the pinned [pvm-qemu build](#qemu) in your pvm data folder (`%USERPROFILE%\.pvm`, or `PVM_HOME`).
+Both installers put `pvm.exe` and `pvm-desktop.exe` in `%LOCALAPPDATA%\pvm`, add that folder to the user `PATH`, add a Start menu shortcut and install the Xpra client. They carry no QEMU: see [QEMU](#qemu) for the two sources. Your pvm data folder is `%USERPROFILE%\.pvm`, or `PVM_HOME`.
 
 - Stay with the installer type you started with; each refuses to run over the other. To switch, uninstall in Settings > Apps first.
 - `pvm upgrade` updates only `pvm.exe`. Run the new installer to update PVM Desktop.
-- Uninstalling keeps your VMs, keys, configuration and QEMU builds under `~/.pvm`.
+- Uninstalling keeps your VMs, keys, configuration and QEMU builds under `~/.pvm`. The builds are in `~/.pvm\runtime\qemu\builds`; delete them yourself if you no longer need them.
+- Upgrading from v1.4.0 leaves its QEMU in place; pvm takes it over as a project build when the daemon next starts. If you upgrade from the v1.4.0 MSI without running pvm in between, that QEMU is removed with the old version and PVM Desktop asks you to set QEMU up again.
 
 <details>
 <summary>More about the Windows installers</summary>
@@ -59,13 +60,13 @@ Acceleration, DNS and WSL2 settings are in [SKILL.md](SKILL.md).
 
 ### macOS and Linux
 
-Install GitHub CLI (`gh`) and Python 3, then:
+Install GitHub CLI (`gh`), then:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/BitterOrange/pvm/master/scripts/install.sh | sh
 ```
 
-The script installs `pvm` to `~/.local/bin` (`INSTALL_DIR` changes it) with the pinned QEMU build (`PVM_SKIP_QEMU=1` skips it). It checks the checksum and the GitHub build attestation before replacing anything, and keeps the previous version.
+The script installs `pvm` to `~/.local/bin` (`INSTALL_DIR` changes it). It checks the checksum and the GitHub build attestation before replacing anything, and keeps the previous version. Then it sets up QEMU as `PVM_QEMU` says: `project` (the default) runs `pvm qemu install -y`, `official` runs `pvm qemu use official -y` with the QEMU you installed from Homebrew or your distribution, and `none` only prints those commands. If QEMU setup fails, pvm stays installed and the script exits non-zero. It installs v1.4.0 and later; for an older `TAG`, it prints the URL of that version's own script.
 
 ### Quickstart
 
@@ -233,13 +234,12 @@ Update checks are off by default; set `update_check: true` in `~/.pvm/config.yam
 
 Recent releases (all versions are in [docs/release-notes](docs/release-notes)):
 
-- **v1.4.1** (in progress): upstream v1.3.0-1.3.1 merged, bringing Mihomo exits, `pvm check`, `pvm diag`, `pvm dashboard`, `--json`, `pvm job`, `pvm ssh-config`, `pvm-exit` with `pvm exit deploy` and invites, `pvm image default`, VMs restarted after a daemon restart, the memory balloon, DoH failover, and the clipboard bridge on macOS and Linux. A route switch sets the timezone of the exit's public IP. The installers, `pvm upgrade` and `pvm exit deploy` verify release attestations with `gh` but need no GitHub login. Tested end to end on Windows (WHPX), Linux (KVM) and an M1 Mac, with the project QEMU build and the official ones.
+- **v1.4.1** (in progress): upstream v1.3.0-1.3.1 merged, bringing Mihomo exits, `pvm check`, `pvm diag`, `pvm dashboard`, `--json`, `pvm job`, `pvm ssh-config`, `pvm-exit` with `pvm exit deploy` and invites, `pvm image default`, VMs restarted after a daemon restart, the memory balloon, DoH failover, and the clipboard bridge on macOS and Linux. A route switch sets the timezone of the exit's public IP. The installers and `install.sh` no longer carry QEMU: PVM Desktop, `pvm qemu install` or `PVM_QEMU` sets it up. The installers, `pvm upgrade` and `pvm exit deploy` verify release attestations with `gh` but need no GitHub login. Tested end to end on Windows (WHPX), Linux (KVM) and an M1 Mac, with the project QEMU build and the official ones.
 - **v1.4.0**: `pvm qemu`, with pinned pvm-qemu builds or the platform's official QEMU; the gateway boots on M1 Macs.
 - **v1.3.x**: PVM Desktop, the app catalog, the keyring setting, window scale and input methods in `pvm app`.
 
 Next:
 
-- Installers and `install.sh` without QEMU, which `pvm qemu install` then sets up ([plan](docs/design/qemu.md))
 - v1.4.2: Mihomo exits from a subscription link, with manual and automatic updates that never switch the selected node
 - WHPX: AVX in VMs, and a QEMU chosen per VM
 - PVM Desktop: tested from the installers, updating itself, a tray icon, and screens for snapshots, port maps and mounts

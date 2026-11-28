@@ -13,7 +13,7 @@
 - **虚拟机里的程序作为宿主机窗口。** `pvm app dev1 -- gedit` 把一个程序作为独立窗口显示在桌面上；它的 cookie、指纹和流量都留在虚拟机里。
 - **把项目目录带进虚拟机。** 挂载目录、两边各保留一份同步，或上传一次再下载结果。
 - **适合脚本和 agent。** `--json` 输出、`pvm capabilities`、`pvm job`，以及只读的 `pvm dashboard`。
-- **Windows 无需管理员权限。** 一个安装包装好 pvm、PVM Desktop 应用、QEMU 和 Xpra 客户端。
+- **Windows 无需管理员权限。** 一个安装包装好 pvm、PVM Desktop 应用和 Xpra 客户端；之后由 PVM Desktop 或 `pvm qemu install` 设置 QEMU。
 
 ## 安装
 
@@ -23,13 +23,14 @@ pvm 支持 arm64 的 macOS、amd64 的 Linux 和 amd64 的 Windows。
 
 1. 从 [Releases](../../releases) 下载 `pvm_windows_amd64_setup.exe` 或 `pvm_windows_amd64_setup.msi`。如需先校验：`gh attestation verify pvm_windows_amd64_setup.exe --repo BitterOrange/pvm`。
 2. 运行安装包，不需要管理员权限。
-3. 打开新的终端运行 `pvm doctor`，或从开始菜单打开 **PVM Desktop**。
+3. 从开始菜单打开 **PVM Desktop**，在里面设置 QEMU；或打开新的终端运行 `pvm qemu install`。
 
-两种安装包都会把 `pvm.exe` 和 `pvm-desktop.exe` 放到 `%LOCALAPPDATA%\pvm`，把该目录加入用户 `PATH`，添加开始菜单快捷方式，安装 Xpra 客户端，并把固定的 [pvm-qemu 构建](#qemu) 放进 pvm 数据目录（`%USERPROFILE%\.pvm`，或 `PVM_HOME`）。
+两种安装包都会把 `pvm.exe` 和 `pvm-desktop.exe` 放到 `%LOCALAPPDATA%\pvm`，把该目录加入用户 `PATH`，添加开始菜单快捷方式，并安装 Xpra 客户端。安装包不带 QEMU，两种来源见 [QEMU](#qemu)。pvm 数据目录是 `%USERPROFILE%\.pvm`，或 `PVM_HOME`。
 
 - 一台机器只用一种安装包：两者都会拒绝覆盖另一种。要换用另一种，先在“设置 > 应用”里卸载。
 - `pvm upgrade` 只更新 `pvm.exe`。更新 PVM Desktop 需要运行新的安装包。
-- 卸载会保留 `~/.pvm` 下的虚拟机、密钥、配置和 QEMU 构建。
+- 卸载会保留 `~/.pvm` 下的虚拟机、密钥、配置和 QEMU 构建。构建在 `~/.pvm\runtime\qemu\builds`，不再需要时自行删除。
+- 从 v1.4.0 升级时，它放的 QEMU 会留在原处，daemon 下次启动时收编为项目构建。如果从 v1.4.0 的 MSI 升级、中间没运行过 pvm，这份 QEMU 会随旧版本一起删除，PVM Desktop 会提示重新设置 QEMU。
 
 <details>
 <summary>关于 Windows 安装包的更多说明</summary>
@@ -59,13 +60,13 @@ Windows 有两种后端，用 `PVM_BACKEND` 或 `~/.pvm/config.yaml` 中的 `bac
 
 ### macOS 和 Linux
 
-先安装 GitHub CLI（`gh`）和 Python 3，然后：
+先安装 GitHub CLI（`gh`），然后：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/BitterOrange/pvm/master/scripts/install.sh | sh
 ```
 
-脚本把 `pvm` 安装到 `~/.local/bin`（可用 `INSTALL_DIR` 修改），并安装固定的 QEMU 构建（`PVM_SKIP_QEMU=1` 跳过）。替换任何文件之前，它会校验校验和以及 GitHub 构建证明，并保留上一个版本。
+脚本把 `pvm` 安装到 `~/.local/bin`（可用 `INSTALL_DIR` 修改）。替换任何文件之前，它会校验校验和以及 GitHub 构建证明，并保留上一个版本。之后按 `PVM_QEMU` 设置 QEMU：`project`（默认）运行 `pvm qemu install -y`；`official` 运行 `pvm qemu use official -y`，使用你从 Homebrew 或发行版装好的 QEMU；`none` 只打印这两条命令。QEMU 设置失败时 pvm 仍保持安装，脚本以非零退出码结束。脚本只安装 v1.4.0 及以后的版本；`TAG` 更早时，它会给出那个版本自己的脚本地址。
 
 ### 快速开始
 
@@ -233,13 +234,12 @@ ufw route allow in on pvmexit1 out on eth0
 
 近期版本（全部版本见 [docs/release-notes](docs/release-notes)）：
 
-- **v1.4.1**（进行中）：合并上游 v1.3.0-1.3.1，带来 Mihomo 出口、`pvm check`、`pvm diag`、`pvm dashboard`、`--json`、`pvm job`、`pvm ssh-config`、`pvm-exit` 及 `pvm exit deploy` 和邀请串、`pvm image default`、daemon 重启后恢复虚拟机、内存 balloon、DoH 主备切换，以及 macOS 和 Linux 上的剪贴板桥。切换路由时按出口公网 IP 的所在地设置时区。安装脚本、`pvm upgrade` 和 `pvm exit deploy` 用 `gh` 校验发布签名，但不需要登录 GitHub。已在 Windows（WHPX）、Linux（KVM）和 M1 Mac 上端到端测试，包括项目构建和官方构建的 QEMU。
+- **v1.4.1**（进行中）：合并上游 v1.3.0-1.3.1，带来 Mihomo 出口、`pvm check`、`pvm diag`、`pvm dashboard`、`--json`、`pvm job`、`pvm ssh-config`、`pvm-exit` 及 `pvm exit deploy` 和邀请串、`pvm image default`、daemon 重启后恢复虚拟机、内存 balloon、DoH 主备切换，以及 macOS 和 Linux 上的剪贴板桥。切换路由时按出口公网 IP 的所在地设置时区。安装包和 `install.sh` 不再自带 QEMU，改由 PVM Desktop、`pvm qemu install` 或 `PVM_QEMU` 设置。安装脚本、`pvm upgrade` 和 `pvm exit deploy` 用 `gh` 校验发布签名，但不需要登录 GitHub。已在 Windows（WHPX）、Linux（KVM）和 M1 Mac 上端到端测试，包括项目构建和官方构建的 QEMU。
 - **v1.4.0**：`pvm qemu`，使用固定的 pvm-qemu 构建或本平台官方 QEMU；M1 Mac 上网关可以启动。
 - **v1.3.x**：PVM Desktop、应用目录、密钥环设置、`pvm app` 的窗口缩放和输入法。
 
 接下来：
 
-- 安装包和 `install.sh` 不再自带 QEMU，改由 `pvm qemu install` 安装（[计划](docs/design/qemu.md)）
 - v1.4.2：Mihomo 出口支持订阅链接导入，以及手动和自动更新，更新时绝不自动切换已选节点
 - WHPX：虚拟机内可用 AVX，并按虚拟机选择 QEMU
 - PVM Desktop：从安装包完整测试、自行更新、托盘图标，以及快照、端口映射和挂载的界面

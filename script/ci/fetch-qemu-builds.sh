@@ -8,8 +8,7 @@
 #   fetch-qemu-builds.sh --bridge DIR    also put the recommended archives in
 #                                        DIR under the names pvm v1.3.x
 #                                        upgrades from, with their source
-#                                        assets, and extract the Windows tree
-#                                        to DIR/windows-tree for the installers
+#                                        assets
 #
 # The bridge exists in v1.4.x only and is removed in v1.5.0.
 # Needs gh (authenticated), python3, tar and sha256sum.
@@ -98,10 +97,6 @@ while read -r tag host asset want_sha want_size want_tree want_sys recommended; 
     fetch "$tag" "pvm-qemu-$tag-$host-deps-source.tar" "$bridge"
     if [ ! -f "$bridge/pvm-qemu-$tag-source.tar.gz" ]; then
       fetch "$tag" "pvm-qemu-$tag-source.tar.gz" "$bridge"
-    fi
-    if [ "$host" = windows-amd64 ]; then
-      rm -rf "$bridge/windows-tree"
-      cp -R "$tree" "$bridge/windows-tree"
     fi
   fi
 done < <(tail -n +3 "$work/pins.txt")

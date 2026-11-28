@@ -109,15 +109,16 @@ func writeUpgradeArchive(t *testing.T, path string, files map[string]string) str
 	return hex.EncodeToString(sum[:])
 }
 
-func TestInstallerStagesAllAssetsBeforeReplacing(t *testing.T) {
-	for _, scenario := range []string{"attestation-fails", "runtime-download-fails", "runtime-checksum-fails", "binary-version-fails", "binary-platform-fails", "unsafe-archive", "success", "binary-rename-fails"} {
+// install.sh replaces the binary only after every check passes, then sets
+// QEMU up with the installed pvm; a failed QEMU setup keeps the new binary.
+func TestInstallerChecksBeforeReplacingAndSetsUpQEMU(t *testing.T) {
+	for _, scenario := range []string{"attestation-fails", "binary-version-fails", "binary-platform-fails", "unsafe-archive", "binary-rename-fails", "project", "official", "none", "qemu-setup-fails", "bad-pvm-qemu", "old-tag"} {
 		t.Run(scenario, func(t *testing.T) {
 			dir := t.TempDir()
 			bin := filepath.Join(dir, "bin")
 			install := filepath.Join(dir, "install")
 			fixtures := filepath.Join(dir, "fixtures")
-			home := filepath.Join(dir, "state")
-			for _, p := range []string{bin, install, fixtures, filepath.Join(home, "runtime/qemu/aarch64")} {
+			for _, p := range []string{bin, install, fixtures} {
 				if err := os.MkdirAll(p, 0700); err != nil {
 					t.Fatal(err)
 				}
@@ -129,21 +130,18 @@ func TestInstallerStagesAllAssetsBeforeReplacing(t *testing.T) {
 				}
 			}
 			write(filepath.Join(install, "pvm"), "old-binary")
-			write(filepath.Join(home, "runtime/qemu/aarch64/old"), "old-runtime")
-			version := "v1.2.3"
+			qemuLog := filepath.Join(dir, "qemu.log")
+			version := "v1.4.1"
 			if scenario == "binary-version-fails" {
 				version = "v9.9.9"
 			}
-			binaryFiles := map[string]string{"pvm": "#!/bin/sh\necho " + version + "\n"}
+			binaryFiles := map[string]string{"pvm": "#!/bin/sh\nif [ \"$1\" = version ]; then echo " + version + "; exit 0; fi\n" +
+				"echo \"$PVM_BACKEND|$*\" >> \"$QEMU_LOG\"\n[ \"$SCENARIO\" != qemu-setup-fails ]\n"}
 			if scenario == "unsafe-archive" {
 				binaryFiles["../escaped"] = "must not extract"
 			}
 			sum := writeUpgradeArchive(t, filepath.Join(fixtures, "pvm_darwin_arm64.tar.gz"), binaryFiles)
-			qsum := writeUpgradeArchive(t, filepath.Join(fixtures, "pvm-qemu-runtime-aarch64.tar.gz"), map[string]string{"aarch64/bin/qemu-system-aarch64": "#!/bin/sh\nexit 0\n", "aarch64/bin/qemu-img": "#!/bin/sh\nexit 0\n", "aarch64/share/qemu/edk2-aarch64-code.fd": "firmware"})
-			if scenario == "runtime-checksum-fails" {
-				qsum = strings.Repeat("0", 64)
-			}
-			write(filepath.Join(fixtures, "SHA256SUMS"), sum+"  pvm_darwin_arm64.tar.gz\n"+qsum+"  pvm-qemu-runtime-aarch64.tar.gz\n")
+			write(filepath.Join(fixtures, "SHA256SUMS"), sum+"  pvm_darwin_arm64.tar.gz\n")
 			write(filepath.Join(bin, "file"), "#!/bin/sh\nif [ \"$SCENARIO\" = binary-platform-fails ]; then echo 'ELF 64-bit executable aarch64'; else echo 'Mach-O 64-bit executable arm64'; fi\n")
 			write(filepath.Join(bin, "uname"), "#!/bin/sh\ncase \"$1\" in -s) echo Darwin;; -m) echo arm64;; esac\n")
 			write(filepath.Join(bin, "curl"), `#!/bin/sh
@@ -165,9 +163,7 @@ case "$url" in
     printf 200
     exit 0 ;;
 esac
-name=${url##*/}
-if [ "$SCENARIO" = runtime-download-fails ] && [ "$name" = pvm-qemu-runtime-aarch64.tar.gz ]; then exit 22; fi
-cp "$FIXTURES/$name" "$out"
+cp "$FIXTURES/${url##*/}" "$out"
 `)
 			write(filepath.Join(bin, "gh"), `#!/bin/sh
 [ "$SCENARIO" != attestation-fails ] || exit 1
@@ -177,56 +173,87 @@ while [ $# -gt 0 ]; do
 done
 exit 1
 `)
-			write(filepath.Join(bin, "codesign"), "#!/bin/sh\necho '<key>com.apple.security.hypervisor</key><true/>'\n")
 			mv, err := exec.LookPath("mv")
 			if err != nil {
 				t.Fatal(err)
 			}
-			moveFlag := "-fh"
-			if runtime.GOOS != "darwin" {
-				moveFlag = "-fT"
-			}
 			write(filepath.Join(bin, "mv"), fmt.Sprintf(`#!/bin/sh
 if [ "$SCENARIO" = binary-rename-fails ] && [ "$1" = -f ] && [ "$3" = "$INSTALL_DIR/pvm" ]; then exit 1; fi
-if [ "$1" = -fh ]; then shift; exec %q %s "$@"; fi
 exec %q "$@"
-`, mv, moveFlag, mv))
+`, mv))
 			script, err := filepath.Abs("../../scripts/install.sh")
 			if err != nil {
 				t.Fatal(err)
 			}
-			cmd := exec.Command("sh", script)
-			cmd.Env = append(os.Environ(), "PATH="+bin+":/usr/bin:/bin", "INSTALL_DIR="+install, "PVM_HOME="+home, "TAG=v1.2.3", "PVM_SKIP_QEMU=0", "FIXTURES="+fixtures, "SCENARIO="+scenario)
-			out, err := cmd.CombinedOutput()
-			if !strings.Contains(string(out), "downloading pvm_darwin_arm64.tar.gz") {
-				t.Fatalf("installer did not reach download: %v: %s", err, out)
+			tag, mode := "v1.4.1", ""
+			switch scenario {
+			case "official", "none":
+				mode = scenario
+			case "bad-pvm-qemu":
+				mode = "bundled"
+			case "old-tag":
+				tag = "v1.3.6"
 			}
-			if scenario == "success" {
+			cmd := exec.Command("sh", script)
+			for _, e := range os.Environ() {
+				if !strings.HasPrefix(e, "PVM_QEMU=") && !strings.HasPrefix(e, "PVM_BACKEND=") {
+					cmd.Env = append(cmd.Env, e)
+				}
+			}
+			cmd.Env = append(cmd.Env, "PATH="+bin+":/usr/bin:/bin", "INSTALL_DIR="+install, "TAG="+tag,
+				"FIXTURES="+fixtures, "SCENARIO="+scenario, "QEMU_LOG="+qemuLog)
+			if mode != "" {
+				cmd.Env = append(cmd.Env, "PVM_QEMU="+mode)
+			}
+			out, err := cmd.CombinedOutput()
+			calls, _ := os.ReadFile(qemuLog)
+			installed, _ := os.ReadFile(filepath.Join(install, "pvm"))
+			switch scenario {
+			case "bad-pvm-qemu", "old-tag":
+				if err == nil || strings.Contains(string(out), "downloading") {
+					t.Fatalf("must refuse before any download: %v: %s", err, out)
+				}
+				want := map[string]string{"bad-pvm-qemu": "invalid PVM_QEMU=bundled", "old-tag": "raw.githubusercontent.com/BitterOrange/pvm/v1.3.6/scripts/install.sh"}[scenario]
+				if !strings.Contains(string(out), want) {
+					t.Fatalf("output lacks %q: %s", want, out)
+				}
+				return
+			case "project", "official", "none":
 				if err != nil {
 					t.Fatalf("install: %v: %s", err, out)
 				}
-				data, _ := os.ReadFile(filepath.Join(install, "pvm"))
-				if !strings.Contains(string(data), "v1.2.3") {
+				if !strings.Contains(string(installed), "v1.4.1") {
 					t.Fatal("new binary not installed")
 				}
-				if _, err := os.Readlink(filepath.Join(home, "runtime/qemu/aarch64")); err != nil {
-					t.Fatal("runtime was not versioned", err)
+				want := map[string]string{"project": "|qemu install -y\n", "official": "|qemu use official -y\n", "none": ""}[scenario]
+				if string(calls) != want {
+					t.Fatalf("qemu calls %q, want %q", calls, want)
 				}
-				matches, _ := filepath.Glob(filepath.Join(install, "pvm.previous.*"))
-				if len(matches) != 1 {
+				if scenario == "none" && !strings.Contains(string(out), "pvm qemu install") {
+					t.Fatalf("none must print the setup commands: %s", out)
+				}
+				if matches, _ := filepath.Glob(filepath.Join(install, "pvm.previous.*")); len(matches) != 1 {
 					t.Fatal("missing old binary")
 				}
-			} else {
+			case "qemu-setup-fails":
+				if err == nil || !strings.Contains(string(out), "pvm is installed; QEMU setup failed: retry pvm qemu install") {
+					t.Fatalf("a failed QEMU setup must fail visibly: %v: %s", err, out)
+				}
+				if !strings.Contains(string(installed), "v1.4.1") {
+					t.Fatal("a failed QEMU setup must keep the new binary")
+				}
+			default:
+				if !strings.Contains(string(out), "downloading pvm_darwin_arm64.tar.gz") {
+					t.Fatalf("installer did not reach download: %v: %s", err, out)
+				}
 				if err == nil {
 					t.Fatal("expected failure")
 				}
-				data, _ := os.ReadFile(filepath.Join(install, "pvm"))
-				if string(data) != "old-binary" {
+				if string(installed) != "old-binary" {
 					t.Fatal("failure changed installed binary")
 				}
-				data, e := os.ReadFile(filepath.Join(home, "runtime/qemu/aarch64/old"))
-				if e != nil || string(data) != "old-runtime" {
-					t.Fatalf("failure lost old runtime: %v", e)
+				if len(calls) != 0 {
+					t.Fatalf("QEMU set up after a failed install: %q", calls)
 				}
 			}
 			if _, err := os.Stat(filepath.Join(install, "escaped")); !errors.Is(err, os.ErrNotExist) {

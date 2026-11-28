@@ -447,12 +447,11 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y --no-install-recommends p7zip-full unzip nsis wixl
             # v1.4.x only: the pinned pvm-qemu archives under the names pvm
-            # v1.3.x upgrades from, their source, and the Windows tree that
-            # the installers still carry.
+            # v1.3.x upgrades from, and their source.
             ./script/ci/fetch-qemu-builds.sh --bridge "$RUNNER_TEMP/bridge"
             mv "$RUNNER_TEMP"/bridge/pvm-qemu-* .
             ./script/windows/fetch-xpra-client.sh "$RUNNER_TEMP/win-xpra"
-            ./script/windows/pack-setup.sh pvm.exe pvm-desktop.exe "$RUNNER_TEMP/bridge/windows-tree" "$RUNNER_TEMP/win-xpra" pvm_windows_amd64_setup
+            ./script/windows/pack-setup.sh pvm.exe pvm-desktop.exe "$RUNNER_TEMP/win-xpra" pvm_windows_amd64_setup
             tar -czf pvm_windows_amd64.tar.gz pvm.exe
           fi
           tar -czf '${{ matrix.out }}.tar.gz' pvm
