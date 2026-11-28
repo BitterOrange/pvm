@@ -363,7 +363,7 @@ Without SSH from the host, set up the VPS by hand and pass the invite:
 ```bash
 # on the VPS, one of:
 sudo apt install ./pvm-exit_<version>_amd64.deb                 # starts the service
-sh install-exit.sh --public-endpoint vps.example.com             # scripts/install-exit.sh; as root or as a user
+sh install-exit.sh --public-endpoint vps.example.com             # scripts/install-exit.sh; as root or as a user; needs gh, no login
 sudo pvm-exit invite laptop --host vps.example.com --raw         # prints the invite, pvmx1:...
 
 # on the host, paste it on stdin so it stays out of shell history:

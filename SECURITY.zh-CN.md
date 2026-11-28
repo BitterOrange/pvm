@@ -160,7 +160,7 @@ pvm 只运行用 `pvm qemu` 选定的 QEMU 构建，从不在 PATH 中查找。�
 
 pvm 的发布：
 
-- 发布安装脚本和自升级除了核对 `SHA256SUMS`，还要求 `gh attestation verify`，把归档绑定到本仓库、发布 workflow 和所选 tag。这意味着信任 GitHub 和获授权的 workflow；它不能防范获授权者做出的恶意源码改动。没有匹配证明的下载会被拒绝。
+- 发布安装脚本和自升级除了核对 `SHA256SUMS`，还要求 `gh attestation verify`，把归档绑定到本仓库、发布 workflow 和所选 tag。这意味着信任 GitHub 和获授权的 workflow；它不能防范获授权者做出的恶意源码改动。没有匹配证明的下载会被拒绝。`scripts/install-exit.sh` 不登录就从 GitHub API 取得公开的 attestation，再用 `gh attestation verify --bundle` 离线校验，所以 VPS 上要装 `gh`，但不需要任何 GitHub 凭据；API 连不上、拒绝请求或没有该文件的 attestation 时，什么都不安装。
 - 安装会先准备好所有文件，并保留之前的文件。pvm 不构建也不重新打包 QEMU，`pvm upgrade` 只替换 pvm 二进制，从不改动 QEMU（见上文 QEMU 构建）。
 - 仅在 v1.4.x 中，发布还以旧的 `pvm-qemu-runtime-*` 名称附带固定 pvm-qemu 构建的逐字节相同副本及其完整对应源码，以便旧版客户端升级。安装脚本切换二进制和 QEMU 运行时是两个独立的文件系统操作；把已有运行时目录首次迁移到版本化存储，不是跨路径的崩溃原子事务。
 
