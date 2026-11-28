@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  pvm-setup.wxs: per-user MSI for pvm, PVM Desktop and the bundled QEMU
-  runtime, built with wixl (msitools) by script/windows/pack-setup.sh. Runtime
-  file components come from wixl-heat (RuntimeFiles).
+  pvm-setup.wxs: per-user MSI for pvm, PVM Desktop and the Xpra client,
+  built with wixl (msitools) by script/windows/pack-setup.sh. QEMU is set up
+  afterwards with `pvm qemu`. Xpra file components come from wixl-heat
+  (XpraFiles).
 
   wixl limits shape this file: there is no Environment element, so
   user-path.ps1 (shared with the NSIS installer) edits the user PATH, and EXE
@@ -15,21 +16,23 @@
   <Product Id="*" Name="pvm" Language="1033" Version="$(var.MsiVersion)" Manufacturer="pvm"
            UpgradeCode="6B0E7B6C-3C1F-4E36-9B4E-2E5A9E0D6F31">
     <Package InstallerVersion="500" Compressed="yes" InstallScope="perUser"
-             Description="pvm $(var.Version)" Comments="pvm $(var.Version) with bundled QEMU runtime"/>
+             Description="pvm $(var.Version)" Comments="pvm $(var.Version) with PVM Desktop and the Xpra client"/>
     <!-- Remove the old version after installing the new one: removed first,
          same-version DLLs are costed as already present (Action Null) and
          then deleted with the old product. Needs stable component GUIDs,
-         which pack-setup.sh assigns to the runtime files. wixl ignores
-         Schedule, so InstallExecuteSequence pins the actions below. -->
+         which pack-setup.sh assigns to the Xpra files. wixl ignores
+         Schedule, so InstallExecuteSequence pins the actions below.
+         v1.4.0 placed QEMU in [PVMHOME]\runtime\qemu\msi-payload; its
+         removal here takes only what pvm has not yet moved into builds. -->
     <MajorUpgrade DowngradeErrorMessage="A newer version of pvm is already installed."/>
     <Media Id="1" Cabinet="pvm.cab" EmbedCab="yes"/>
     <Property Id="ARPNOMODIFY" Value="1"/>
     <Property Id="ARPNOREPAIR" Value="1"/>
 
-    <!-- PVMHOME decides where the runtime goes. Maintenance and upgrades reuse
-         the recorded value, so uninstall never resolves a different directory
-         than the one installed into; a new install takes PVMHOME=... from the
-         command line, else a persistent PVM_HOME, else ~/.pvm. -->
+    <!-- PVMHOME is the data folder that pvm-running.ps1 checks for running
+         VMs. Maintenance and upgrades reuse the recorded value; a new install
+         takes PVMHOME=... from the command line, else a persistent PVM_HOME,
+         else ~/.pvm. -->
     <Property Id="PVMHOME">
       <RegistrySearch Id="RecordedPvmHome" Root="HKCU" Key="Software\pvm\msi" Name="PvmHome" Type="raw"/>
     </Property>
@@ -41,7 +44,6 @@
     <Condition Message="pvm was installed with the .exe setup. Uninstall it in Settings &gt; Apps first (your VMs are kept), then run this installer again, or update with the .exe setup.">Installed OR NOT NSISINSTALL</Condition>
     <CustomAction Id="SetPvmHomeEnv" Property="PVMHOME" Value="[%PVM_HOME]"/>
     <CustomAction Id="SetPvmHomeProfile" Property="PVMHOME" Value="[%USERPROFILE]\.pvm"/>
-    <CustomAction Id="SetRuntimeDir" Property="RUNTIMEDIR" Value="[PVMHOME]\runtime\qemu\msi-payload\x86_64\"/>
     <CustomAction Id="SetPowerShell" Property="POWERSHELL" Value="[System64Folder]WindowsPowerShell\v1.0\powershell.exe"/>
 
     <!-- Replacing files under a running daemon or VM would defer them to the
@@ -73,14 +75,12 @@
     <InstallUISequence>
       <Custom Action="SetPvmHomeEnv" Sequence="985">NOT PVMHOME AND %PVM_HOME</Custom>
       <Custom Action="SetPvmHomeProfile" Sequence="986">NOT PVMHOME</Custom>
-      <Custom Action="SetRuntimeDir" Sequence="990"/>
       <Custom Action="SetPowerShell" Sequence="992"/>
       <Custom Action="StopRunningUI" Sequence="1010"/>
     </InstallUISequence>
     <InstallExecuteSequence>
       <Custom Action="SetPvmHomeEnv" Sequence="985">NOT PVMHOME AND %PVM_HOME</Custom>
       <Custom Action="SetPvmHomeProfile" Sequence="986">NOT PVMHOME</Custom>
-      <Custom Action="SetRuntimeDir" Sequence="990"/>
       <Custom Action="SetPowerShell" Sequence="992"/>
       <Custom Action="StopRunningBasicUI" Sequence="1009">UILevel = 3</Custom>
       <Custom Action="CheckNotRunning" Sequence="1010"/>
@@ -100,13 +100,6 @@
           <Directory Id="XPRADIR" Name="xpra"/>
         </Directory>
       </Directory>
-      <!-- Placeholder; SetRuntimeDir redirects it to [PVMHOME]\runtime\qemu\msi-payload\x86_64.
-           The pinned pvm-qemu build goes into a folder of its own, with
-           component GUIDs of its own: an upgrade from v1.3.x removes the old
-           runtime as files that MSI placed, instead of costing same-version
-           DLLs as present and leaving a mixed tree. pvm takes the payload
-           over into runtime\qemu\builds when its daemon next starts. -->
-      <Directory Id="RUNTIMEDIR" Name="pvm-runtime"/>
       <Directory Id="ProgramMenuFolder"/>
     </Directory>
 
@@ -139,7 +132,6 @@
       <ComponentRef Id="DesktopShortcut"/>
       <ComponentRef Id="UserPath"/>
       <ComponentRef Id="InstallState"/>
-      <ComponentGroupRef Id="RuntimeFiles"/>
       <ComponentGroupRef Id="XpraFiles"/>
     </Feature>
   </Product>

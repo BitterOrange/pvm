@@ -240,11 +240,11 @@ Each names the next command, and none falls back to another build. Examples:
 - The MSI installs it into `[PVMHOME]\runtime\qemu\msi-payload\x86_64` with component GUIDs from a new heat prefix, `msi-payload/x86_64/`. Component GUIDs come from the path only, `RemoveExistingProducts` runs late, and same-or-higher-version DLLs are costed as already present, so an upgrade at the old path would probably leave a mixed weilnetz and pvm-qemu tree that cannot be adopted. At a new path, the old MSI's slot files are removed as files it placed, and the new files are fresh installs. Migration adopts the payload. The MSI experiment (see Phase 0) measures this; the fallback is `REINSTALLMODE=amus` at the old path.
 - `pvm-running.ps1` takes `-PvmHome` instead of `-RuntimeDir`. It matches `pvm.exe` and `pvm-desktop.exe` by path under the install dir, and `qemu-system-x86_64.exe` when its command line, with backslashes and without case, contains `<PvmHome>\vms\`. VMs then count wherever their QEMU lives; bake and gateway VMs also live under `vms\`. NSIS writes a `PvmHome` value under its uninstall key, and its Uninstall section reads it (an empty value aborts with a message). The MSI passes `[PVMHOME]`.
 
-**v1.4.1** drops QEMU from NSIS, the MSI (`RuntimeFiles`, `RUNTIMEDIR`, `SetRuntimeDir`) and `pack-setup.sh`, whose arguments become `<pvm.exe> <pvm-desktop.exe> <xpra-dir> [out]`. NSIS removes its `RuntimeRoot` value once. Expected MSI outcomes, to be confirmed: v1.4.0 to v1.4.1 removes nothing that migration already moved; if pvm never ran in between, the payload goes and the QEMU page appears; v1.3.6 to v1.4.1 removes the old repack. `builds\` has no MSI components. A v1.3.x `uninstall.exe` kept by `pvm upgrade` still checks `-RuntimeDir`, so the notes tell Windows users to rerun the installer.
+**v1.4.1** drops QEMU from NSIS, the MSI (`RuntimeFiles`, `RUNTIMEDIR`, `SetRuntimeDir`) and `pack-setup.sh`, whose arguments become `<pvm.exe> <pvm-desktop.exe> <xpra-dir> [out]`. NSIS removes its `RuntimeRoot` value once. MSI outcomes, confirmed in Windows Sandbox: v1.4.0 to v1.4.1 removes nothing that migration already moved; if pvm never ran in between, the payload goes and the QEMU page appears. Expected but not tested: v1.3.6 to v1.4.1 removes the old repack. `builds\` has no MSI components. A v1.3.x `uninstall.exe` kept by `pvm upgrade` still checks `-RuntimeDir`, so the notes tell Windows users to rerun the installer.
 
 **Auto backend.** Without bundled QEMU, today's rule would send fresh installs on machines with pvm in WSL to a dead end. `auto` chooses native when a native daemon is healthy or `qemu.Ready` holds (a default is set, or an adoption is pending), otherwise wsl when WSL has pvm, otherwise native. A detected but unregistered official QEMU does not count. Native setup under wsl is explicit: `PVM_BACKEND=native pvm qemu install`, or Desktop's route.
 
-**Uninstall** never removes `runtime\qemu\builds` or official installs; kept VMs and snapshots are bound to them, and from v1.4.1 the installer did not place them. The message names `pvm qemu rm --all -y`, to run before uninstalling.
+**Uninstall** never removes `runtime\qemu\builds` or official installs; kept VMs and snapshots are bound to them, and from v1.4.1 the installer did not place them. The NSIS confirm page and its last log line name `~\.pvm\runtime\qemu\builds` as the folder to delete by hand. There is no `pvm qemu rm --all`: `rm` refuses the default build, so a command list would not empty the folder, and the folder is all a user needs.
 
 ## pvm upgrade and install.sh
 
@@ -264,7 +264,7 @@ Each names the next command, and none falls back to another build. Examples:
 - `TAG` below v1.4.0 is refused with the URL of that tag's own script.
 - `PVM_QEMU=project|official|none` (default `project`), validated before any download. After the binary is in place, `project` runs `pvm qemu install -y` (downloads only when the recommended pin is missing, never switches an existing default), `official` runs `pvm qemu use official -y`, and `none` prints both commands. On failure it exits non-zero with `pvm is installed; QEMU setup failed: retry pvm qemu install`, and the binary stays.
 - `gh` stays required for the pvm binary's own attestation.
-- A CI job runs master's `install.sh` against the current Latest, weekly and on PRs that touch it.
+- A CI job that runs master's `install.sh` against the current Latest, weekly and on PRs that touch it, is not part of v1.4.1; it is on the roadmap. `TestInstallerChecksBeforeReplacingAndSetsUpQEMU` covers the script with a fake release.
 
 ## Old clients: bridge assets and rollback
 
@@ -426,6 +426,8 @@ Exit, on real HVF, KVM and WHPX hosts: a fresh install from the installers reach
 ### Phase 1b: new install.sh, then v1.4.1
 
 The new `install.sh` merges right after v1.4.0 is Latest. v1.4.1 removes QEMU from NSIS, the MSI and `pack-setup.sh`, documents first-run setup, proxies, `--file`, the auto backend with pvm in WSL and that uninstall keeps builds, and adds the Windows tag smoke from the roadmap (silent install, `pvm qemu install -y`, `pvm qemu check --default`, then uninstall with builds kept).
+
+Status: done for v1.4.1. In Windows Sandbox, with installers built by `pack-setup.sh`, a fresh NSIS and MSI install places no QEMU and `pvm qemu check --default` exits 3; an upgrade from the v1.4.0 NSIS or MSI after a pvm run keeps the taken-over build as the default; an upgrade from the v1.4.0 NSIS without a run leaves the old slot, which the next daemon start takes over; one from the v1.4.0 MSI without a run removes the payload, so QEMU must be set up again; NSIS drops `RuntimeRoot`; uninstall keeps `~/.pvm` and the builds. `install.sh` ran with each `PVM_QEMU` on Linux, macOS and Git Bash against v1.4.0. The tag smoke and the `install.sh` CI job wait on the roadmap.
 
 Exit: a fresh Windows 11 VM without `gh` reaches a running WHPX VM through Desktop alone and through the CLI alone, also behind an explicit proxy and offline with `--file`; the NSIS and MSI upgrade and uninstall matrices pass; master's `install.sh` installs Latest in CI; the installer size drop is measured.
 

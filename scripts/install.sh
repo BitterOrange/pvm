@@ -7,7 +7,14 @@ REPO="pvm"
 API="https://api.github.com/repos/${OWNER}/${REPO}/releases/latest"
 BASE="https://github.com/${OWNER}/${REPO}/releases/download"
 ATTEST_API="https://api.github.com/repos/${OWNER}/${REPO}/attestations"
-command -v gh >/dev/null 2>&1 || { echo "GitHub CLI (gh) with attestation support is required to check the release; no GitHub login is needed" >&2; exit 1; }
+# PVM_QEMU picks how QEMU is set up once pvm is installed: project (the
+# build this pvm recommends, from the pvm-qemu project), official (the
+# platform's own QEMU, which you install yourself) or none.
+PVM_QEMU="${PVM_QEMU:-project}"
+case "$PVM_QEMU" in
+  project|official|none) ;;
+  *) echo "invalid PVM_QEMU=$PVM_QEMU (want project, official or none)" >&2; exit 2 ;;
+esac
 die() { echo "$1; installed version unchanged" >&2; exit 1; }
 header() { tr -d '\r' < att.hdr | awk -v k="$1" -F': *' 'tolower($1) == k {print $2}'; }
 # The attestation is public: fetch it anonymously and verify it offline,
@@ -44,34 +51,28 @@ fi
 case "$TAG" in
   ''|*[!a-zA-Z0-9.-]*|.*|-*) echo "invalid release tag" >&2; exit 1 ;;
 esac
+# This script sets QEMU up with `pvm qemu`, which older releases lack; they
+# install with the script of their own tag.
+major=$(printf %s "$TAG" | sed -n 's/^v\([0-9][0-9]*\)\.\([0-9][0-9]*\)\..*/\1/p')
+minor=$(printf %s "$TAG" | sed -n 's/^v\([0-9][0-9]*\)\.\([0-9][0-9]*\)\..*/\2/p')
+[ -n "$major" ] && [ -n "$minor" ] || { echo "invalid release tag" >&2; exit 1; }
+if [ "$major" -lt 1 ] || { [ "$major" -eq 1 ] && [ "$minor" -lt 4 ]; }; then
+  echo "$TAG predates pvm qemu; install it with its own script: curl -fsSL https://raw.githubusercontent.com/$OWNER/$REPO/$TAG/scripts/install.sh | TAG=$TAG sh" >&2
+  exit 1
+fi
+command -v gh >/dev/null 2>&1 || { echo "GitHub CLI (gh) with attestation support is required to check the release; no GitHub login is needed" >&2; exit 1; }
 S=$(uname -s)
 M=$(uname -m)
 BIN_NAME=pvm
-QEMU_ARCH=""
-QEMU_ASSET=""
-FIRMWARE_REL=""
 case "$S/$M" in
-  Darwin/arm64)
-    ASSET="pvm_darwin_arm64"
-    QEMU_ARCH="aarch64"
-    QEMU_ASSET="pvm-qemu-runtime-aarch64.tar.gz"
-    FIRMWARE_REL="share/qemu/edk2-aarch64-code.fd"
-    ;;
-  Linux/x86_64)
-    ASSET="pvm_linux_amd64"
-    QEMU_ARCH="x86_64"
-    QEMU_ASSET="pvm-qemu-runtime-linux-x86_64.tar.gz"
-    FIRMWARE_REL="share/qemu/bios-256k.bin"
-    ;;
+  Darwin/arm64) ASSET="pvm_darwin_arm64" ;;
+  Linux/x86_64) ASSET="pvm_linux_amd64" ;;
   MINGW64_NT-*/x86_64|MSYS_NT-*/x86_64)
     ASSET="pvm_windows_amd64"
     BIN_NAME="pvm.exe"
-    QEMU_ARCH="x86_64"
-    QEMU_ASSET="pvm-qemu-runtime-windows-x86_64.tar.gz"
-    FIRMWARE_REL="bin/share/bios-256k.bin"
     ;;
   Linux/aarch64|Linux/arm64)
-    echo "linux/arm64 host is not supported; for a VPS exit-agent download pvm_linux_arm64.tar.gz from releases manually" >&2; exit 1 ;;
+    echo "linux/arm64 host is not supported; for a VPS exit server use scripts/install-exit.sh" >&2; exit 1 ;;
   *) echo "unsupported host: $S/$M (supported: darwin/arm64, linux/amd64, windows/amd64)" >&2; exit 1 ;;
 esac
 
@@ -82,30 +83,12 @@ INSTALL_DIR=$(cd "$INSTALL_DIR" && pwd)
 LOCK_DIR="$INSTALL_DIR/.pvm-install.lock"
 mkdir "$LOCK_DIR" 2>/dev/null || { echo "another installation is active (or interrupted; inspect $LOCK_DIR)" >&2; exit 1; }
 TMP=$(mktemp -d "$INSTALL_DIR/.pvm-install.XXXXXX") || { rmdir "$LOCK_DIR"; exit 1; }
-case "$S" in
-  MINGW64_NT-*|MSYS_NT-*)
-    if [ -z "${PVM_HOME:-}" ] && [ -n "${USERPROFILE:-}" ] && command -v cygpath >/dev/null 2>&1; then
-      PVM_HOME="$(cygpath -u "$USERPROFILE")/.pvm"
-      export PVM_HOME
-    fi
-    ;;
-esac
-RUNTIME_ROOT="${PVM_HOME:-$HOME/.pvm}/runtime/qemu"
-RUNTIME_STAGE=""
-RUNTIME_OLD=""
-RUNTIME_SWITCHED=0
 BINARY_SWITCHED=0
 BINARY_BACKUP=""
 COMMITTED=0
 cleanup() {
   rc=$?
   trap - EXIT INT TERM
-  if [ "$COMMITTED" = 0 ] && [ "$RUNTIME_SWITCHED" = 1 ]; then
-    rm -rf "$RUNTIME_ROOT/$QEMU_ARCH"
-    if [ -n "$RUNTIME_OLD" ]; then
-      mv "$RUNTIME_OLD" "$RUNTIME_ROOT/$QEMU_ARCH" || echo "runtime restore failed; restore $RUNTIME_OLD to $RUNTIME_ROOT/$QEMU_ARCH" >&2
-    fi
-  fi
   if [ "$COMMITTED" = 0 ] && [ "$BINARY_SWITCHED" = 1 ]; then
     if [ -n "$BINARY_BACKUP" ]; then
       cp -p "$BINARY_BACKUP" "$INSTALL_DIR/$BIN_NAME"
@@ -113,7 +96,6 @@ cleanup() {
       rm -f "$INSTALL_DIR/$BIN_NAME"
     fi
   fi
-  if [ "$COMMITTED" = 0 ] && [ -n "$RUNTIME_STAGE" ]; then rm -rf "$RUNTIME_STAGE"; fi
   rm -rf "$TMP"
   rmdir "$LOCK_DIR"
   exit "$rc"
@@ -154,61 +136,37 @@ esac
 chmod 755 "$BIN_NAME"
 [ "$(./$BIN_NAME version)" = "$TAG" ] || { echo "release version mismatch" >&2; exit 1; }
 
-if [ -n "$QEMU_ASSET" ] && [ "${PVM_SKIP_QEMU:-0}" != "1" ]; then
-  echo "staging bundled qemu runtime ($QEMU_ARCH)..."
-  curl -fsSL "$BASE/$TAG/$QEMU_ASSET" -o qemu.tar.gz
-  attest qemu.tar.gz "$QEMU_ASSET"
-  verify "$QEMU_ASSET" qemu.tar.gz
-  tar -tzf qemu.tar.gz > qemu.entries
-  awk -v arch="$QEMU_ARCH" '/^\// || /(^|\/)\.\.(\/|$)/ {bad=1} $0 != arch && index($0, arch"/") != 1 {bad=1} END {exit bad}' qemu.entries || { echo "unsafe runtime archive paths" >&2; exit 1; }
-  mkdir -p "$RUNTIME_ROOT"
-  RUNTIME_ROOT=$(cd "$RUNTIME_ROOT" && pwd)
-  RUNTIME_STAGE=$(mktemp -d "$RUNTIME_ROOT/release-${TAG}.XXXXXX")
-  tar -tvzf qemu.tar.gz | awk 'substr($0,1,1) != "-" && substr($0,1,1) != "d" {bad=1} END {exit bad}' || { echo "runtime archive must contain only files and directories" >&2; exit 1; }
-  tar -xzf qemu.tar.gz -C "$RUNTIME_STAGE"
-  [ -x "$RUNTIME_STAGE/$QEMU_ARCH/bin/qemu-system-$QEMU_ARCH" ] || { echo "runtime executable missing" >&2; exit 1; }
-  "$RUNTIME_STAGE/$QEMU_ARCH/bin/qemu-system-$QEMU_ARCH" --version >/dev/null
-  "$RUNTIME_STAGE/$QEMU_ARCH/bin/qemu-img" --version >/dev/null
-  [ -s "$RUNTIME_STAGE/$QEMU_ARCH/$FIRMWARE_REL" ] || { echo "runtime firmware missing" >&2; exit 1; }
-  if [ "$S" = "Darwin" ]; then
-    codesign --verify --strict "$RUNTIME_STAGE/$QEMU_ARCH/bin/qemu-system-$QEMU_ARCH"
-    codesign -d --entitlements :- "$RUNTIME_STAGE/$QEMU_ARCH/bin/qemu-system-$QEMU_ARCH" 2>/dev/null | grep -q '<key>com.apple.security.hypervisor</key><true' || { echo "runtime HVF entitlement missing" >&2; exit 1; }
-  fi
-fi
-
-# Preserve the previous binary before changing either installed component.
 if [ -e "$INSTALL_DIR/$BIN_NAME" ]; then
   BACKUP=$(mktemp "$INSTALL_DIR/$BIN_NAME.previous.XXXXXX")
   cp -p "$INSTALL_DIR/$BIN_NAME" "$BACKUP"
   BINARY_BACKUP="$BACKUP"
   echo "binary rollback: cp '$BACKUP' '$INSTALL_DIR/.pvm-rollback' && mv -f '$INSTALL_DIR/.pvm-rollback' '$INSTALL_DIR/$BIN_NAME'"
 fi
-if [ -n "$RUNTIME_STAGE" ]; then
-  RUNTIME_SWITCHED=1
-  if [ -e "$RUNTIME_ROOT/$QEMU_ARCH" ] || [ -L "$RUNTIME_ROOT/$QEMU_ARCH" ]; then
-    RUNTIME_OLD="$RUNTIME_STAGE/previous"
-    if [ -L "$RUNTIME_ROOT/$QEMU_ARCH" ]; then
-      cp -P "$RUNTIME_ROOT/$QEMU_ARCH" "$RUNTIME_OLD"
-    else
-      mv "$RUNTIME_ROOT/$QEMU_ARCH" "$RUNTIME_OLD"
-    fi
-  fi
-  if [ "$S" = "Darwin" ]; then
-    ln -s "$RUNTIME_STAGE/$QEMU_ARCH" "$RUNTIME_STAGE/current"
-    mv -fh "$RUNTIME_STAGE/current" "$RUNTIME_ROOT/$QEMU_ARCH"
-  else
-    mv -f "$RUNTIME_STAGE/$QEMU_ARCH" "$RUNTIME_ROOT/$QEMU_ARCH"
-  fi
-fi
 BINARY_SWITCHED=1
 mv -f "$TMP/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
 COMMITTED=1
-if [ -n "$RUNTIME_OLD" ]; then
-  echo "runtime rollback: rm -rf '$RUNTIME_ROOT/$QEMU_ARCH' && mv '$RUNTIME_OLD' '$RUNTIME_ROOT/$QEMU_ARCH'"
-fi
 echo "installed: $INSTALL_DIR/$BIN_NAME"
 case ":$PATH:" in
   *:"$INSTALL_DIR":*) ;;
   *) echo "add to PATH: export PATH=\"$INSTALL_DIR:\$PATH\"" ;;
 esac
-echo "next: pvm create --image ubuntu:26.04 --name dev1 --user dev  (首次会自动下载镜像并烘焙 golden，属一次性，约十几分钟)"
+
+# pvm itself is installed now; a failed QEMU setup leaves it in place.
+PVM="$INSTALL_DIR/$BIN_NAME"
+case "$S" in
+  # This installs the native Windows pvm, so its QEMU is native too, even
+  # where pvm in WSL would be the auto backend.
+  MINGW64_NT-*|MSYS_NT-*) PVM_BACKEND=native; export PVM_BACKEND ;;
+esac
+cd "$INSTALL_DIR"
+case "$PVM_QEMU" in
+  project)
+    echo "setting up QEMU: pvm qemu install"
+    "$PVM" qemu install -y || { echo "pvm is installed; QEMU setup failed: retry pvm qemu install" >&2; exit 1; } ;;
+  official)
+    echo "setting up QEMU: pvm qemu use official"
+    "$PVM" qemu use official -y || { echo "pvm is installed; QEMU setup failed: install your platform's QEMU and run pvm qemu use official" >&2; exit 1; } ;;
+  none)
+    echo "QEMU not set up; pvm needs one to run VMs: pvm qemu install (a build from the pvm-qemu project), or pvm qemu use official (your platform's QEMU)" ;;
+esac
+echo "next: pvm create --image ubuntu:26.04 --name dev1 --user dev  (the first create downloads the image and bakes the golden image once, about ten minutes)"

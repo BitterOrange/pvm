@@ -1,9 +1,8 @@
-; pvm-setup.nsi: per-user Windows installer for pvm, PVM Desktop, the bundled
-; QEMU runtime and the Xpra client for `pvm app`. Built by
+; pvm-setup.nsi: per-user Windows installer for pvm, PVM Desktop and the Xpra
+; client for `pvm app`. QEMU is set up afterwards with `pvm qemu`. Built by
 ; script/windows/pack-setup.sh; do not run makensis directly.
 ;
-; Required defines: VERSION, PVM_EXE, DESKTOP_EXE, RUNTIME_DIR, XPRA_DIR,
-; OUTFILE.
+; Required defines: VERSION, PVM_EXE, DESKTOP_EXE, XPRA_DIR, OUTFILE.
 
 Unicode true
 SetCompressor /SOLID lzma
@@ -24,7 +23,7 @@ ShowInstDetails show
 ShowUninstDetails show
 
 !define MUI_ABORTWARNING
-!define MUI_FINISHPAGE_TEXT "pvm ${VERSION} is installed.$\r$\n$\r$\nOpen PVM Desktop from the Start menu, or open a new terminal and run:$\r$\n  pvm create --image ubuntu:26.04 --name dev1 --user dev"
+!define MUI_FINISHPAGE_TEXT "pvm ${VERSION} is installed.$\r$\n$\r$\nOpen PVM Desktop from the Start menu: it sets up QEMU, which pvm needs to run VMs. Or open a new terminal and run:$\r$\n  pvm qemu install$\r$\n  pvm create --image ubuntu:26.04 --name dev1 --user dev"
 ; Unchecked: opening the app starts the pvm daemon, which setup must not do
 ; unasked.
 !define MUI_FINISHPAGE_RUN "$INSTDIR\pvm-desktop.exe"
@@ -33,12 +32,12 @@ ShowUninstDetails show
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
+!define MUI_UNCONFIRMPAGE_TEXT_TOP "pvm, PVM Desktop and the Xpra client will be removed. Your VMs and the QEMU builds pvm installed stay under ~/.pvm; the builds are in ~/.pvm\runtime\qemu\builds, which you can delete afterwards if you no longer need them."
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
 
 Var PvmHome
-Var RuntimeRoot
 
 ; The MSI installs into the same folder; mixing the two leaves two entries
 ; in Apps, and removing either one breaks the other.
@@ -113,9 +112,6 @@ Section "pvm"
   ${If} $PvmHome == ""
     StrCpy $PvmHome "$PROFILE\.pvm"
   ${EndIf}
-  ; The pinned pvm-qemu build goes into the folder pvm v1.3.x used; pvm
-  ; takes it over into runtime\qemu\builds when its daemon next starts.
-  StrCpy $RuntimeRoot "$PvmHome\runtime\qemu"
 
   Call EnsureStopped
 
@@ -137,27 +133,12 @@ Section "pvm"
   ; its window.
   File "/oname=pvm-desktop.new.exe" "${DESKTOP_EXE}"
 
-  DetailPrint "Staging QEMU runtime..."
-  RMDir /r "$RuntimeRoot\.x86_64.new"
-  SetOutPath "$RuntimeRoot\.x86_64.new"
-  File /r "${RUNTIME_DIR}\*.*"
-  ; Leave the staged directory: Windows cannot rename a process's cwd.
-  SetOutPath "$INSTDIR"
-  nsExec::ExecToStack /OEM '"$RuntimeRoot\.x86_64.new\bin\qemu-system-x86_64.exe" --version'
-  Pop $1
-  Pop $2
-  ${If} $1 != 0
-    RMDir /r "$RuntimeRoot\.x86_64.new"
-    Delete "$INSTDIR\pvm-desktop.new.exe"
-    Delete "$INSTDIR\pvm.new.exe"
-    Abort "staged qemu-system-x86_64.exe failed to run (exit $1)"
-  ${EndIf}
-
   ; pvm looks for the Xpra client in xpra\ next to pvm.exe.
   DetailPrint "Staging Xpra client..."
   RMDir /r "$INSTDIR\.xpra.new"
   SetOutPath "$INSTDIR\.xpra.new"
   File /r "${XPRA_DIR}\*.*"
+  ; Leave the staged directory: Windows cannot rename a process's cwd.
   SetOutPath "$INSTDIR"
   nsExec::ExecToStack /OEM '"$INSTDIR\.xpra.new\Xpra_cmd.exe" --version'
   Pop $1
@@ -165,40 +146,16 @@ Section "pvm"
   ${If} $1 != 0
   ${OrIfNot} ${FileExists} "$INSTDIR\.xpra.new\Xpra.exe"
     RMDir /r "$INSTDIR\.xpra.new"
-    RMDir /r "$RuntimeRoot\.x86_64.new"
     Delete "$INSTDIR\pvm-desktop.new.exe"
     Delete "$INSTDIR\pvm.new.exe"
     Abort "staged Xpra_cmd.exe failed to run (exit $1)"
   ${EndIf}
 
-  ; Swap the runtime, keeping the previous one until the binary is in place.
-  RMDir /r "$RuntimeRoot\.x86_64.old"
-  ${If} ${FileExists} "$RuntimeRoot\x86_64\*.*"
-    !insertmacro RenameRetry "$RuntimeRoot\x86_64" "$RuntimeRoot\.x86_64.old"
-    ${If} ${Errors}
-      RMDir /r "$RuntimeRoot\.x86_64.new"
-      Delete "$INSTDIR\pvm-desktop.new.exe"
-      Delete "$INSTDIR\pvm.new.exe"
-      Abort "cannot replace $RuntimeRoot\x86_64 (a QEMU process may still be using it)"
-    ${EndIf}
-  ${EndIf}
-  !insertmacro RenameRetry "$RuntimeRoot\.x86_64.new" "$RuntimeRoot\x86_64"
-  ${If} ${Errors}
-    Rename "$RuntimeRoot\.x86_64.old" "$RuntimeRoot\x86_64"
-    RMDir /r "$RuntimeRoot\.x86_64.new"
-    RMDir /r "$INSTDIR\.xpra.new"
-    Delete "$INSTDIR\pvm-desktop.new.exe"
-    Delete "$INSTDIR\pvm.new.exe"
-    Abort "cannot move the new runtime into $RuntimeRoot\x86_64; the previous runtime was restored"
-  ${EndIf}
-
-  ; Swap the Xpra client the same way.
+  ; Swap the Xpra client, keeping the previous one until pvm.exe is in place.
   RMDir /r "$INSTDIR\.xpra.old"
   ${If} ${FileExists} "$INSTDIR\xpra\*.*"
     !insertmacro RenameRetry "$INSTDIR\xpra" "$INSTDIR\.xpra.old"
     ${If} ${Errors}
-      RMDir /r "$RuntimeRoot\x86_64"
-      Rename "$RuntimeRoot\.x86_64.old" "$RuntimeRoot\x86_64"
       RMDir /r "$INSTDIR\.xpra.new"
       Delete "$INSTDIR\pvm-desktop.new.exe"
       Delete "$INSTDIR\pvm.new.exe"
@@ -209,8 +166,6 @@ Section "pvm"
   ${If} ${Errors}
     Rename "$INSTDIR\.xpra.old" "$INSTDIR\xpra"
     RMDir /r "$INSTDIR\.xpra.new"
-    RMDir /r "$RuntimeRoot\x86_64"
-    Rename "$RuntimeRoot\.x86_64.old" "$RuntimeRoot\x86_64"
     Delete "$INSTDIR\pvm-desktop.new.exe"
     Delete "$INSTDIR\pvm.new.exe"
     Abort "cannot move the new Xpra client into $INSTDIR\xpra; the previous version was restored"
@@ -221,8 +176,6 @@ Section "pvm"
   ${If} ${FileExists} "$INSTDIR\pvm-desktop.exe"
     !insertmacro RenameRetry "$INSTDIR\pvm-desktop.exe" "$INSTDIR\pvm-desktop.old.exe"
     ${If} ${Errors}
-      RMDir /r "$RuntimeRoot\x86_64"
-      Rename "$RuntimeRoot\.x86_64.old" "$RuntimeRoot\x86_64"
       RMDir /r "$INSTDIR\xpra"
       Rename "$INSTDIR\.xpra.old" "$INSTDIR\xpra"
       Delete "$INSTDIR\pvm-desktop.new.exe"
@@ -233,8 +186,6 @@ Section "pvm"
   !insertmacro RenameRetry "$INSTDIR\pvm-desktop.new.exe" "$INSTDIR\pvm-desktop.exe"
   ${If} ${Errors}
     Rename "$INSTDIR\pvm-desktop.old.exe" "$INSTDIR\pvm-desktop.exe"
-    RMDir /r "$RuntimeRoot\x86_64"
-    Rename "$RuntimeRoot\.x86_64.old" "$RuntimeRoot\x86_64"
     RMDir /r "$INSTDIR\xpra"
     Rename "$INSTDIR\.xpra.old" "$INSTDIR\xpra"
     Delete "$INSTDIR\pvm-desktop.new.exe"
@@ -246,8 +197,6 @@ Section "pvm"
   ${If} ${FileExists} "$INSTDIR\pvm.exe"
     !insertmacro RenameRetry "$INSTDIR\pvm.exe" "$INSTDIR\pvm.old.exe"
     ${If} ${Errors}
-      RMDir /r "$RuntimeRoot\x86_64"
-      Rename "$RuntimeRoot\.x86_64.old" "$RuntimeRoot\x86_64"
       RMDir /r "$INSTDIR\xpra"
       Rename "$INSTDIR\.xpra.old" "$INSTDIR\xpra"
       Delete "$INSTDIR\pvm-desktop.exe"
@@ -259,8 +208,6 @@ Section "pvm"
   !insertmacro RenameRetry "$INSTDIR\pvm.new.exe" "$INSTDIR\pvm.exe"
   ${If} ${Errors}
     Rename "$INSTDIR\pvm.old.exe" "$INSTDIR\pvm.exe"
-    RMDir /r "$RuntimeRoot\x86_64"
-    Rename "$RuntimeRoot\.x86_64.old" "$RuntimeRoot\x86_64"
     RMDir /r "$INSTDIR\xpra"
     Rename "$INSTDIR\.xpra.old" "$INSTDIR\xpra"
     Delete "$INSTDIR\pvm-desktop.exe"
@@ -270,9 +217,8 @@ Section "pvm"
   ${EndIf}
   Delete "$INSTDIR\pvm.old.exe"
   Delete "$INSTDIR\pvm-desktop.old.exe"
-  RMDir /r "$RuntimeRoot\.x86_64.old"
   RMDir /r "$INSTDIR\.xpra.old"
-  DetailPrint "Installed $INSTDIR\pvm.exe, $INSTDIR\pvm-desktop.exe, $INSTDIR\xpra and $RuntimeRoot\x86_64"
+  DetailPrint "Installed $INSTDIR\pvm.exe, $INSTDIR\pvm-desktop.exe and $INSTDIR\xpra"
 
   DetailPrint "Adding $INSTDIR to the user PATH..."
   !insertmacro UserPath add "$INSTDIR"
@@ -281,7 +227,8 @@ Section "pvm"
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "pvm"
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
-  WriteRegStr HKCU "${UNINST_KEY}" "RuntimeRoot" "$RuntimeRoot"
+  ; v1.4.0 recorded where it placed QEMU; this installer places none.
+  DeleteRegValue HKCU "${UNINST_KEY}" "RuntimeRoot"
   WriteRegStr HKCU "${UNINST_KEY}" "PvmHome" "$PvmHome"
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\pvm.exe"
   WriteRegStr HKCU "${UNINST_KEY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
@@ -297,20 +244,14 @@ Section "pvm"
 SectionEnd
 
 ; Removes only what the installer placed, and the value PVM Desktop writes
-; to open at login: VM disks, keys and config under ~/.pvm are user data and
-; stay.
+; to open at login. VM disks, keys, config and the QEMU builds under ~/.pvm
+; stay: kept VMs and their snapshots are bound to those builds.
 Section "Uninstall"
-  ReadRegStr $RuntimeRoot HKCU "${UNINST_KEY}" "RuntimeRoot"
   ReadRegStr $PvmHome HKCU "${UNINST_KEY}" "PvmHome"
   ${If} $PvmHome == ""
     Abort "the pvm data folder is not recorded; run the pvm installer again, then uninstall"
   ${EndIf}
   Call un.EnsureStopped
-
-  ${If} $RuntimeRoot != ""
-    RMDir /r "$RuntimeRoot\x86_64"
-    RMDir "$RuntimeRoot"
-  ${EndIf}
 
   !insertmacro UserPath remove "$INSTDIR"
 
@@ -322,5 +263,5 @@ Section "Uninstall"
   Delete "$INSTDIR\uninstall.exe"
   RMDir "$INSTDIR"
   DeleteRegKey HKCU "${UNINST_KEY}"
-  DetailPrint "VM data under ~/.pvm was kept; delete it manually if no longer needed."
+  DetailPrint "VM data and QEMU builds under $PvmHome were kept; the builds are in $PvmHome\runtime\qemu\builds. Delete them manually if no longer needed."
 SectionEnd
